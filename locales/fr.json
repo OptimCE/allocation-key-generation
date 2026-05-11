@@ -1,0 +1,33 @@
+{
+  "ERRORS": {
+    "AUTH": {
+      "UNAUTHORIZED": "Authentification requise (code: 1)",
+      "FORBIDDEN": "Accès refusé (code: 2)",
+      "RATE_LIMITED": "Trop de requêtes, veuillez réessayer plus tard (code: 3)",
+      "AUTHORIZATION_MISSING": "En-tête d'autorisation manquant (code: 4)"
+    },
+    "SUBSCRIPTION": {
+      "SUBSCRIPTION": "Erreur d'abonnement (code: 1000)",
+      "UNSUBSCRIBED": "Désabonnement impossible (code: 1001)",
+      "ALREADY_SUBSCRIBED": "Vous êtes déjà abonné à ce service (code: 1002)",
+      "NOT_SUBSCRIBED": "Vous n'êtes pas abonné à ce service (code: 1003)"
+    },
+    "GENERATION": {
+      "GET_GENERATIONS": "Impossible de récupérer la liste des générations (code: 2000)",
+      "GET_ALLOCATION_KEYS": "Impossible de récupérer les clés de répartition (code: 2001)",
+      "GET_ALLOCATION_KEY": "Impossible de récupérer la clé de répartition (code: 2002)",
+      "ALLOCATION_KEY_NOT_FOUND": "Clé de répartition introuvable (code: 2003)",
+      "SAVE_KEY": "Impossible d'enregistrer la clé de répartition (code: 2004)",
+      "DELETE_GENERATION": "Impossible de supprimer la génération (code: 2005)",
+      "DELETE_KEY": "Impossible de supprimer la clé de répartition (code: 2006)",
+      "GENERATION_NOT_FOUND": "Génération introuvable (code: 2007)",
+      "GET_ALGORITHMS": "Impossible de récupérer la liste des algorithmes (code: 2008)",
+      "GET_ALGORITHM_INPUT": "Impossible de récupérer les entrées de l'algorithme (code: 2009)",
+      "ALGORITHM": {
+        "NOT_FOUND": "Algorithme introuvable (code: 2010)"
+      },
+      "START_GENERATION": "Impossible de démarrer la génération (code: 2011)",
+      "INVALID_ALGORITHM_INPUTS": "Entrées d'algorithme invalides (code: 2012)"
+    }
+  }
+}

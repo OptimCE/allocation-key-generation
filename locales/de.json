@@ -1,0 +1,33 @@
+{
+  "ERRORS": {
+    "AUTH": {
+      "UNAUTHORIZED": "Authentifizierung erforderlich (Code: 1)",
+      "FORBIDDEN": "Zugriff verweigert (Code: 2)",
+      "RATE_LIMITED": "Zu viele Anfragen, bitte später erneut versuchen (Code: 3)",
+      "AUTHORIZATION_MISSING": "Autorisierungs-Header fehlt (Code: 4)"
+    },
+    "SUBSCRIPTION": {
+      "SUBSCRIPTION": "Abonnementfehler (Code: 1000)",
+      "UNSUBSCRIBED": "Abmeldung nicht möglich (Code: 1001)",
+      "ALREADY_SUBSCRIBED": "Sie sind bereits für diesen Dienst angemeldet (Code: 1002)",
+      "NOT_SUBSCRIBED": "Sie sind nicht für diesen Dienst angemeldet (Code: 1003)"
+    },
+    "GENERATION": {
+      "GET_GENERATIONS": "Liste der Generierungen konnte nicht abgerufen werden (Code: 2000)",
+      "GET_ALLOCATION_KEYS": "Verteilungsschlüssel konnten nicht abgerufen werden (Code: 2001)",
+      "GET_ALLOCATION_KEY": "Verteilungsschlüssel konnte nicht abgerufen werden (Code: 2002)",
+      "ALLOCATION_KEY_NOT_FOUND": "Verteilungsschlüssel nicht gefunden (Code: 2003)",
+      "SAVE_KEY": "Verteilungsschlüssel konnte nicht gespeichert werden (Code: 2004)",
+      "DELETE_GENERATION": "Generierung konnte nicht gelöscht werden (Code: 2005)",
+      "DELETE_KEY": "Verteilungsschlüssel konnte nicht gelöscht werden (Code: 2006)",
+      "GENERATION_NOT_FOUND": "Generierung nicht gefunden (Code: 2007)",
+      "GET_ALGORITHMS": "Liste der Algorithmen konnte nicht abgerufen werden (Code: 2008)",
+      "GET_ALGORITHM_INPUT": "Algorithmus-Eingaben konnten nicht abgerufen werden (Code: 2009)",
+      "ALGORITHM": {
+        "NOT_FOUND": "Algorithmus nicht gefunden (Code: 2010)"
+      },
+      "START_GENERATION": "Generierung konnte nicht gestartet werden (Code: 2011)",
+      "INVALID_ALGORITHM_INPUTS": "Ungültige Algorithmus-Eingaben (Code: 2012)"
+    }
+  }
+}

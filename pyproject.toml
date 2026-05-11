@@ -1,0 +1,35 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning"]
+
+[tool.coverage.run]
+omit = ["scripts/*", "tests/*", "core/models/__init__.py", "*/main.py"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+exclude = [
+    "tests/",
+    "scripts/",
+    "\\.venv/",
+    "_impl",
+]
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "opentelemetry.*",
+    "fakeredis.*",
+    "factory.*",
+    "asyncpg.*",
+    "nats.*",
+]
+ignore_missing_imports = true

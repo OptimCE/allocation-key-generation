@@ -1,0 +1,33 @@
+{
+  "ERRORS": {
+    "AUTH": {
+      "UNAUTHORIZED": "Authentication required (code: 1)",
+      "FORBIDDEN": "Access denied (code: 2)",
+      "RATE_LIMITED": "Too many requests, please try again later (code: 3)",
+      "AUTHORIZATION_MISSING": "Missing authorization header (code: 4)"
+    },
+    "SUBSCRIPTION": {
+      "SUBSCRIPTION": "Subscription error (code: 1000)",
+      "UNSUBSCRIBED": "Unable to unsubscribe (code: 1001)",
+      "ALREADY_SUBSCRIBED": "You are already subscribed to this service (code: 1002)",
+      "NOT_SUBSCRIBED": "You are not subscribed to this service (code: 1003)"
+    },
+    "GENERATION": {
+      "GET_GENERATIONS": "Unable to retrieve the list of generations (code: 2000)",
+      "GET_ALLOCATION_KEYS": "Unable to retrieve allocation keys (code: 2001)",
+      "GET_ALLOCATION_KEY": "Unable to retrieve the allocation key (code: 2002)",
+      "ALLOCATION_KEY_NOT_FOUND": "Allocation key not found (code: 2003)",
+      "SAVE_KEY": "Unable to save the allocation key (code: 2004)",
+      "DELETE_GENERATION": "Unable to delete the generation (code: 2005)",
+      "DELETE_KEY": "Unable to delete the allocation key (code: 2006)",
+      "GENERATION_NOT_FOUND": "Generation not found (code: 2007)",
+      "GET_ALGORITHMS": "Unable to retrieve the list of algorithms (code: 2008)",
+      "GET_ALGORITHM_INPUT": "Unable to retrieve algorithm inputs (code: 2009)",
+      "ALGORITHM": {
+        "NOT_FOUND": "Algorithm not found (code: 2010)"
+      },
+      "START_GENERATION": "Unable to start the generation (code: 2011)",
+      "INVALID_ALGORITHM_INPUTS": "Invalid algorithm inputs (code: 2012)"
+    }
+  }
+}

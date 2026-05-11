@@ -1,0 +1,33 @@
+{
+  "ERRORS": {
+    "AUTH": {
+      "UNAUTHORIZED": "Authenticatie vereist (code: 1)",
+      "FORBIDDEN": "Toegang geweigerd (code: 2)",
+      "RATE_LIMITED": "Te veel verzoeken, probeer het later opnieuw (code: 3)",
+      "AUTHORIZATION_MISSING": "Autorisatie-header ontbreekt (code: 4)"
+    },
+    "SUBSCRIPTION": {
+      "SUBSCRIPTION": "Abonnementsfout (code: 1000)",
+      "UNSUBSCRIBED": "Afmelden niet mogelijk (code: 1001)",
+      "ALREADY_SUBSCRIBED": "U bent al geabonneerd op deze dienst (code: 1002)",
+      "NOT_SUBSCRIBED": "U bent niet geabonneerd op deze dienst (code: 1003)"
+    },
+    "GENERATION": {
+      "GET_GENERATIONS": "Lijst van generaties kon niet worden opgehaald (code: 2000)",
+      "GET_ALLOCATION_KEYS": "Verdeelsleutels konden niet worden opgehaald (code: 2001)",
+      "GET_ALLOCATION_KEY": "Verdeelsleutel kon niet worden opgehaald (code: 2002)",
+      "ALLOCATION_KEY_NOT_FOUND": "Verdeelsleutel niet gevonden (code: 2003)",
+      "SAVE_KEY": "Verdeelsleutel kon niet worden opgeslagen (code: 2004)",
+      "DELETE_GENERATION": "Generatie kon niet worden verwijderd (code: 2005)",
+      "DELETE_KEY": "Verdeelsleutel kon niet worden verwijderd (code: 2006)",
+      "GENERATION_NOT_FOUND": "Generatie niet gevonden (code: 2007)",
+      "GET_ALGORITHMS": "Lijst van algoritmen kon niet worden opgehaald (code: 2008)",
+      "GET_ALGORITHM_INPUT": "Algoritme-invoer kon niet worden opgehaald (code: 2009)",
+      "ALGORITHM": {
+        "NOT_FOUND": "Algoritme niet gevonden (code: 2010)"
+      },
+      "START_GENERATION": "Generatie kon niet worden gestart (code: 2011)",
+      "INVALID_ALGORITHM_INPUTS": "Ongeldige algoritme-invoer (code: 2012)"
+    }
+  }
+}
