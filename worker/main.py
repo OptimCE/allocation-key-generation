@@ -94,9 +94,7 @@ async def _poll_queue_depth(js, shutdown_event: asyncio.Event) -> None:
                 )
                 app_metrics.queue_depth_snapshot[meta.name] = int(info.num_pending)
             except Exception as exc:
-                logger.debug(
-                    "queue depth poll failed for %s: %s", meta.name, exc
-                )
+                logger.debug("queue depth poll failed for %s: %s", meta.name, exc)
         try:
             await asyncio.wait_for(
                 shutdown_event.wait(), timeout=_QUEUE_DEPTH_POLL_INTERVAL_SECONDS

@@ -51,7 +51,12 @@ def test_request_id_filter_injects_all_context_vars_when_set():
         # state into the next one running on the same task.
         for token, var in zip(
             reversed(tokens),
-            (current_user_role, current_community_id, current_user_id, current_request_id),
+            (
+                current_user_role,
+                current_community_id,
+                current_user_id,
+                current_request_id,
+            ),
         ):
             var.reset(token)
 
