@@ -45,6 +45,9 @@ jobs:
           pip install -r requirements/all.txt
 
       - name: Export OpenAPI spec (JSON)
+        env:
+          CRM_DATABASE_URL: "postgresql+asyncpg://user:pass@localhost/dummy"
+          LOCAL_DATABASE_URL: "postgresql+asyncpg://user:pass@localhost/dummy"
         run: |
           mkdir -p docs
           python scripts/export_openapi.py docs/openapi.json
