@@ -22,7 +22,7 @@ from .inputs import OlagsaInput
 from .metadata import OLAGSA_METADATA
 
 
-class OlagsaAlgorithm(Algorithm):
+class OlagsaAlgorithm(Algorithm[OlagsaInput]):
     metadata = OLAGSA_METADATA
 
     async def run(
@@ -56,10 +56,10 @@ class OlagsaAlgorithm(Algorithm):
         return AlgorithmResult(keys=keys)
 
 
-def _to_allocation_key_result(
-    best: BestSolution, consumer_names: list[str]
-) -> AllocationKeyResult:
+def _to_allocation_key_result(best: BestSolution, consumer_names: list[str]) -> AllocationKeyResult:
     """Convert the GA's native ``BestSolution`` into the pure result schema."""
+    if best.key is None:
+        raise ValueError("BestSolution.key must be set; caller is expected to filter None keys")
     iterations: list[IterationResult] = []
     for idx, iteration in enumerate(best.key.iterations):
         consumers = [
@@ -69,26 +69,20 @@ def _to_allocation_key_result(
                     if j < len(consumer_names) and consumer_names[j]
                     else f"Consumer {j}"
                 ),
-                energy_allocated_percentage=float(
-                    participant.energy_allocated_percentage
-                ),
+                energy_allocated_percentage=float(participant.energy_allocated_percentage),
             )
             for j, participant in enumerate(iteration.consumers)
         ]
         iterations.append(
             IterationResult(
                 number=idx + 1,
-                energy_allocated_percentage=float(
-                    iteration.energy_allocated_percentage
-                ),
+                energy_allocated_percentage=float(iteration.energy_allocated_percentage),
                 surplus_total=float(iteration.surplus_total),
                 consumers=consumers,
             )
         )
 
-    percentages = ",".join(
-        f"{round(it.energy_allocated_percentage, 2)}" for it in iterations
-    )
+    percentages = ",".join(f"{round(it.energy_allocated_percentage, 2)}" for it in iterations)
     final_surplus = round(iterations[-1].surplus_total, 2) if iterations else 0.0
     name = (
         f"Fitness = {round(best.fitness, 2)} / Pourcentage = ({percentages})"

@@ -1,12 +1,7 @@
-from typing import Generic
-
 from pydantic import BaseModel
-from typing_extensions import TypeVar
-
-T = TypeVar("T")
 
 
-class ApiResponse(BaseModel, Generic[T]):
+class ApiResponse[T](BaseModel):
     """
     Standard API response model.
 
@@ -42,7 +37,7 @@ class Pagination(BaseModel):
     total_pages: int
 
 
-class ApiResponsePaginated(ApiResponse, Generic[T]):
+class ApiResponsePaginated[T](ApiResponse[T]):
     """
     Paginated API response model.
 

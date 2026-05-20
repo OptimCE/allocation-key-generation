@@ -47,9 +47,7 @@ def _result_with_one_key() -> AlgorithmResult:
                         number=0,
                         energy_allocated_percentage=100.0,
                         surplus_total=1.0,
-                        consumers=[
-                            ConsumerResult(name="C1", energy_allocated_percentage=100.0)
-                        ],
+                        consumers=[ConsumerResult(name="C1", energy_allocated_percentage=100.0)],
                     )
                 ],
             )
@@ -95,9 +93,7 @@ async def _count_keys_for(db_session, generation_id: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-async def test_save_success_writes_keys_and_flips_status_when_pending(
-    db_session, patched_factory
-):
+async def test_save_success_writes_keys_and_flips_status_when_pending(db_session, patched_factory):
     gen = await create_generation(db_session, id_community=1)
 
     await persistence.save_success(gen.id, _result_with_one_key())
@@ -108,9 +104,7 @@ async def test_save_success_writes_keys_and_flips_status_when_pending(
 
 
 async def test_save_success_no_op_when_already_succeeded(db_session, patched_factory):
-    gen = await create_generation(
-        db_session, id_community=1, status=GenerationStatus.SUCCESS
-    )
+    gen = await create_generation(db_session, id_community=1, status=GenerationStatus.SUCCESS)
 
     await persistence.save_success(gen.id, _result_with_one_key())
 
@@ -166,9 +160,7 @@ async def test_save_failure_flips_status_when_pending(db_session, patched_factor
 
 
 async def test_save_failure_no_op_when_already_succeeded(db_session, patched_factory):
-    gen = await create_generation(
-        db_session, id_community=1, status=GenerationStatus.SUCCESS
-    )
+    gen = await create_generation(db_session, id_community=1, status=GenerationStatus.SUCCESS)
 
     await persistence.save_failure(gen.id, "should be ignored")
 

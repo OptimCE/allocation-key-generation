@@ -1,5 +1,5 @@
 # algorithms/registry.py
-from typing import Type
+
 from .base import Algorithm, AlgorithmMetadata
 
 
@@ -13,7 +13,7 @@ class AlgorithmRegistry:
 
     def __init__(self) -> None:
         self._metadata: dict[str, AlgorithmMetadata] = {}
-        self._implementations: dict[str, Type[Algorithm]] = {}
+        self._implementations: dict[str, type[Algorithm]] = {}
 
     # ---- Registration ------------------------------------------------------
     def register_metadata(self, meta: AlgorithmMetadata) -> None:
@@ -21,7 +21,7 @@ class AlgorithmRegistry:
             raise ValueError(f"Algorithm '{meta.name}' already registered")
         self._metadata[meta.name] = meta
 
-    def register_implementation(self, cls: Type[Algorithm]) -> None:
+    def register_implementation(self, cls: type[Algorithm]) -> None:
         name = cls.metadata.name
         if name not in self._metadata:
             # Register metadata opportunistically if the impl brings its own.
@@ -34,7 +34,7 @@ class AlgorithmRegistry:
             raise KeyError(f"Unknown algorithm: {name}")
         return self._metadata[name]
 
-    def implementation(self, name: str) -> Type[Algorithm]:
+    def implementation(self, name: str) -> type[Algorithm]:
         if name not in self._implementations:
             raise KeyError(f"No implementation loaded for: {name}")
         return self._implementations[name]

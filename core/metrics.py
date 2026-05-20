@@ -20,7 +20,7 @@ duration histograms. Mimir / Prometheus translates these to
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Observation
@@ -64,7 +64,7 @@ queue_depth_snapshot: dict[str, int] = {}
 
 
 def _queue_depth_callback(
-    options: CallbackOptions,  # noqa: ARG001 — required by OTel callback signature
+    options: CallbackOptions,
 ) -> Iterable[Observation]:
     """Emit one observation per algorithm with its current pending count."""
     return [

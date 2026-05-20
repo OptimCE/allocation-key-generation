@@ -23,9 +23,7 @@ class Iteration:
         self.surplus_total: float = 0.0
 
     def compute_consumption_total(self) -> None:
-        self.consumption_total = float(
-            sum(np.sum(c.consumption) for c in self.consumers)
-        )
+        self.consumption_total = float(sum(np.sum(c.consumption) for c in self.consumers))
 
     def compute_surplus(self) -> None:
         T = len(self.consumers[0].surplus)

@@ -1,15 +1,15 @@
 from api.generation.schemas import (
-    Generation,
     AllocationKeyGenerated,
     ConsumerGenerated,
+    Generation,
     IterationGenerated,
     PartialAllocationKeyGenerated,
 )
 from shared.models.crm_models import AllocationKeyModel, ConsumerModel, IterationModel
 from shared.models.local_models import (
-    GenerationModel,
     AllocationKeyGeneratedModel,
     ConsumerGeneratedModel,
+    GenerationModel,
     IterationGeneratedModel,
 )
 
@@ -60,9 +60,7 @@ def to_allocation_key_generated_schema(
         id=allocation_key.id,
         name=allocation_key.name,
         description=allocation_key.description,
-        iterations=[
-            to_iteration_generated_schema(i) for i in allocation_key.iterations
-        ],
+        iterations=[to_iteration_generated_schema(i) for i in allocation_key.iterations],
         surplus_total=sum([i.surplus_total for i in allocation_key.iterations]),
     )
 

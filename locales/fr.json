@@ -7,9 +7,6 @@
       "AUTHORIZATION_MISSING": "En-tête d'autorisation manquant (code: 4)"
     },
     "SUBSCRIPTION": {
-      "SUBSCRIPTION": "Erreur d'abonnement (code: 1000)",
-      "UNSUBSCRIBED": "Désabonnement impossible (code: 1001)",
-      "ALREADY_SUBSCRIBED": "Vous êtes déjà abonné à ce service (code: 1002)",
       "NOT_SUBSCRIBED": "Vous n'êtes pas abonné à ce service (code: 1003)"
     },
     "GENERATION": {
@@ -27,7 +24,17 @@
         "NOT_FOUND": "Algorithme introuvable (code: 2010)"
       },
       "START_GENERATION": "Impossible de démarrer la génération (code: 2011)",
-      "INVALID_ALGORITHM_INPUTS": "Entrées d'algorithme invalides (code: 2012)"
+      "INVALID_ALGORITHM_INPUTS": "Entrées d'algorithme invalides (code: 2012)",
+      "STORAGE_UPLOAD_FAILED": "Impossible d'envoyer le fichier source (code: 2013)",
+      "INVALID_FILE": "Fichier invalide ou vide (code: 2014)"
+    }
+  },
+  "ALGORITHMS": {
+    "BRUTE_FORCE": {
+      "DESCRIPTION": "Énumération exhaustive de clés d'allocation par combinaison d'algorithmes de répartition"
+    },
+    "OLAGSA": {
+      "DESCRIPTION": "Optimisation Linéaire et Algorithme Génétique avec Spéciation Atypique"
     }
   }
 }

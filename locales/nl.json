@@ -7,9 +7,6 @@
       "AUTHORIZATION_MISSING": "Autorisatie-header ontbreekt (code: 4)"
     },
     "SUBSCRIPTION": {
-      "SUBSCRIPTION": "Abonnementsfout (code: 1000)",
-      "UNSUBSCRIBED": "Afmelden niet mogelijk (code: 1001)",
-      "ALREADY_SUBSCRIBED": "U bent al geabonneerd op deze dienst (code: 1002)",
       "NOT_SUBSCRIBED": "U bent niet geabonneerd op deze dienst (code: 1003)"
     },
     "GENERATION": {
@@ -27,7 +24,17 @@
         "NOT_FOUND": "Algoritme niet gevonden (code: 2010)"
       },
       "START_GENERATION": "Generatie kon niet worden gestart (code: 2011)",
-      "INVALID_ALGORITHM_INPUTS": "Ongeldige algoritme-invoer (code: 2012)"
+      "INVALID_ALGORITHM_INPUTS": "Ongeldige algoritme-invoer (code: 2012)",
+      "STORAGE_UPLOAD_FAILED": "Uploaden van het bronbestand is mislukt (code: 2013)",
+      "INVALID_FILE": "Ongeldig of leeg bestand (code: 2014)"
+    }
+  },
+  "ALGORITHMS": {
+    "BRUTE_FORCE": {
+      "DESCRIPTION": "Uitputtende opsomming van verdeelsleutels door combinatie van verdelingsalgoritmen"
+    },
+    "OLAGSA": {
+      "DESCRIPTION": "Lineaire optimalisatie en genetisch algoritme met atypische speciatie"
     }
   }
 }

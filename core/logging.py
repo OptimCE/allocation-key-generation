@@ -1,9 +1,10 @@
 # core/logging.py
 import logging
 import sys
+
 from pythonjsonlogger.json import JsonFormatter
 
-from core.config import settings, Environment
+from core.config import Environment, settings
 
 
 class RequestIdFilter(logging.Filter):

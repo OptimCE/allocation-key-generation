@@ -1,23 +1,25 @@
+import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from algorithms.registry import AlgorithmMetadata, registry
 from api.generation.schemas import (
     AllocationKeyGenerated,
-    Generation,
     GenerateRequest,
     GenerateResponse,
+    Generation,
     PartialAllocationKeyGenerated,
     SaveKey,
 )
 from api.generation.service import GenerationService
 from core.api_response import ApiResponse, ApiResponsePaginated
-from core.database.database import get_local_session, get_crm_session
+from core.context_vars import current_internal_community_id, current_locale
+from core.database.database import get_crm_session, get_local_session
 from core.errors.errors import ErrorException
 from core.errors.with_default_error import with_default_error
-from core.context_vars import current_internal_community_id
+from core.i18n import translate
 from core.security.community_scope import resolve_internal_community
 from core.security.dependencies import require_feature
 from shared.const import FeatureName
@@ -30,6 +32,12 @@ generation_routes = APIRouter(
         Depends(require_feature(FeatureName.ALGORITHM)),
     ]
 )
+
+
+def _localize_metadata(meta: AlgorithmMetadata) -> AlgorithmMetadata:
+    # current_locale defaults to "fr_FR"; SUPPORTED_LOCALES holds bare codes.
+    locale = current_locale.get().split("_")[0]
+    return meta.model_copy(update={"description": translate(meta.description, locale=locale)})
 
 
 # GET (/) : List of generation and their status (pending, success, fails)
@@ -48,12 +56,10 @@ async def get_generations(
 
 
 # GET (/algorithms) : List of available algorithms
-@generation_routes.get(
-    "/algorithms", response_model=ApiResponse[list[AlgorithmMetadata]]
-)
+@generation_routes.get("/algorithms", response_model=ApiResponse[list[AlgorithmMetadata]])
 @with_default_error(default_error=errors.generation.GET_ALGORITHMS)
 async def get_algorithms():
-    data = registry.list_all()
+    data = [_localize_metadata(meta) for meta in registry.list_all()]
     return ApiResponse[list[AlgorithmMetadata]](data=data)
 
 
@@ -64,17 +70,13 @@ async def get_algorithms():
 @with_default_error(default_error=errors.generation.GET_ALGORITHM_INPUT)
 async def get_algorithm_inputs(algorithm_name: str):
     if algorithm_name not in registry:
-        raise ErrorException(
-            error=errors.generation.ALGORITHM_NOT_FOUND, status_code=404
-        )
+        raise ErrorException(error=errors.generation.ALGORITHM_NOT_FOUND, status_code=404)
     data = registry.metadata(algorithm_name)
     return ApiResponse[AlgorithmMetadata](data=data)
 
 
 # GET (/key/{id}) : Key generated
-@generation_routes.get(
-    "/key/{id_key}", response_model=ApiResponse[AllocationKeyGenerated]
-)
+@generation_routes.get("/key/{id_key}", response_model=ApiResponse[AllocationKeyGenerated])
 @with_default_error(default_error=errors.generation.GET_ALLOCATION_KEY)
 async def get_allocation_key(
     id_key: int,
@@ -100,23 +102,44 @@ async def get_allocation_keys(
     page_size: Annotated[int, Query(description="Page size.")] = 20,
 ):
     service = GenerationService(local_session, crm_session)
-    data, pagination = await service.get_allocation_keys(
-        id, page, page_size, query_param
-    )
+    data, pagination = await service.get_allocation_keys(id, page, page_size, query_param)
     return ApiResponsePaginated[list[PartialAllocationKeyGenerated]](
         data=data, pagination=pagination
     )
 
 
 # POST (/) Generate
+# Multipart/form-data: the file is uploaded alongside the metadata. The
+# ``inputs`` form field carries a JSON-encoded dict because FastAPI cannot
+# combine ``UploadFile`` with a Pydantic body model.
 @generation_routes.post("/", response_model=ApiResponse[GenerateResponse])
 @with_default_error(default_error=errors.generation.START_GENERATION)
 async def start_generation(
-    req: Annotated[GenerateRequest, Body()],
     local_session: Annotated[AsyncSession, Depends(get_local_session)],
     crm_session: Annotated[AsyncSession, Depends(get_crm_session)],
+    file: Annotated[UploadFile, File(description="Source data CSV/XLSX file.")],
+    name: Annotated[str, Form(description="User-facing label for the generation.")],
+    injection_name: Annotated[
+        str, Form(description="Injection (production) column name in the file.")
+    ],
+    algorithm_name: Annotated[str, Form(description="Algorithm registry key, e.g. 'olagsa'.")],
+    inputs: Annotated[str, Form(description="JSON-encoded algorithm input dict.")],
 ):
-    service = GenerationService(local_session, crm_session)
+    try:
+        inputs_dict = json.loads(inputs)
+        if not isinstance(inputs_dict, dict):
+            raise ValueError("inputs must be a JSON object")
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ErrorException(
+            error=errors.generation.INVALID_ALGORITHM_INPUTS, status_code=422
+        ) from exc
+
+    req = GenerateRequest(
+        name=name,
+        injection_name=injection_name,
+        algorithm_name=algorithm_name,
+        inputs=inputs_dict,
+    )
     # The router-level Depends(resolve_internal_community) has already
     # resolved the auth community id to the internal CRM integer id and
     # cached it in this ContextVar. Every read path scopes by that same
@@ -124,7 +147,8 @@ async def start_generation(
     internal_community_id = current_internal_community_id.get()
     if internal_community_id is None:
         raise ErrorException(error=errors.auth.UNAUTHORIZED, status_code=401)
-    data = await service.start_generation(req, internal_community_id)
+    service = GenerationService(local_session, crm_session)
+    data = await service.start_generation(req, file, internal_community_id)
     return ApiResponse[GenerateResponse](data=data)
 
 
@@ -142,9 +166,7 @@ async def save_key(
 
 
 # DELETE (/generation/{id}) : Delete an entire generation
-@generation_routes.delete(
-    "/generation/{id_generation}", response_model=ApiResponse[str]
-)
+@generation_routes.delete("/generation/{id_generation}", response_model=ApiResponse[str])
 @with_default_error(default_error=errors.generation.DELETE_GENERATION)
 async def delete_generation(
     id_generation: int,

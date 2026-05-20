@@ -7,9 +7,6 @@
       "AUTHORIZATION_MISSING": "Missing authorization header (code: 4)"
     },
     "SUBSCRIPTION": {
-      "SUBSCRIPTION": "Subscription error (code: 1000)",
-      "UNSUBSCRIBED": "Unable to unsubscribe (code: 1001)",
-      "ALREADY_SUBSCRIBED": "You are already subscribed to this service (code: 1002)",
       "NOT_SUBSCRIBED": "You are not subscribed to this service (code: 1003)"
     },
     "GENERATION": {
@@ -27,7 +24,17 @@
         "NOT_FOUND": "Algorithm not found (code: 2010)"
       },
       "START_GENERATION": "Unable to start the generation (code: 2011)",
-      "INVALID_ALGORITHM_INPUTS": "Invalid algorithm inputs (code: 2012)"
+      "INVALID_ALGORITHM_INPUTS": "Invalid algorithm inputs (code: 2012)",
+      "STORAGE_UPLOAD_FAILED": "Unable to upload the source file (code: 2013)",
+      "INVALID_FILE": "Invalid or empty file (code: 2014)"
+    }
+  },
+  "ALGORITHMS": {
+    "BRUTE_FORCE": {
+      "DESCRIPTION": "Exhaustive enumeration of allocation keys by combining distribution algorithms"
+    },
+    "OLAGSA": {
+      "DESCRIPTION": "Linear Optimization and Genetic Algorithm with Atypical Speciation"
     }
   }
 }

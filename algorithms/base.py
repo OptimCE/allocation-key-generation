@@ -1,7 +1,7 @@
 # algorithms/base.py
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, ClassVar, Type
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
@@ -17,7 +17,7 @@ class AlgorithmInput(BaseModel):
 class AlgorithmRawData:
     """Pre-parsed input data shared by all allocation-key algorithms.
 
-    Produced by the worker (from ``GenerationModel.file_url`` +
+    Produced by the worker (from ``GenerationModel.file_storage_key`` +
     ``GenerationModel.injection_name``) and passed to ``Algorithm.run``.
     The algorithm is a pure function of ``(inputs, raw_data)``.
 
@@ -79,7 +79,10 @@ class AlgorithmMetadata(BaseModel):
     )
     description: str = Field(
         ...,
-        description="Human-readable description shown in the UI.",
+        description=(
+            "i18n key (dot-notation, e.g. 'ALGORITHMS.OLAGSA.DESCRIPTION') "
+            "resolved to a localized string at the API response boundary."
+        ),
     )
     version: str = Field(
         default="1.0",
@@ -89,7 +92,7 @@ class AlgorithmMetadata(BaseModel):
         ...,
         description="NATS subject the worker subscribes to for this algorithm.",
     )
-    input_schema: Type[AlgorithmInput] = Field(
+    input_schema: type[AlgorithmInput] = Field(
         ...,
         description="Pydantic model class describing required and optional inputs.",
     )
@@ -97,7 +100,7 @@ class AlgorithmMetadata(BaseModel):
     timeout_seconds: int | None = Field(default=None)
 
     @field_serializer("input_schema")
-    def _serialize_input_schema(self, input_schema: Type[AlgorithmInput]) -> dict:
+    def _serialize_input_schema(self, input_schema: type[AlgorithmInput]) -> dict:
         """Expose the input schema as its JSON schema dict.
 
         The raw ``Type[AlgorithmInput]`` value is a Pydantic model class
@@ -109,11 +112,14 @@ class AlgorithmMetadata(BaseModel):
 
 
 # ---- Algorithm base --------------------------------------------------------
-class Algorithm(ABC):
+class Algorithm[InputT: AlgorithmInput](ABC):
     """Abstract base for all algorithm implementations.
 
     Only imported by the worker service — subclass modules may pull in
     heavy dependencies like cvxpy, numpy, etc.
+
+    Subclasses parameterize ``InputT`` with their concrete input schema so
+    ``run()`` can declare the specific type without violating LSP.
     """
 
     metadata: ClassVar[AlgorithmMetadata]
@@ -121,7 +127,7 @@ class Algorithm(ABC):
     @abstractmethod
     async def run(
         self,
-        inputs: AlgorithmInput,
+        inputs: InputT,
         raw_data: AlgorithmRawData,
     ) -> AlgorithmResult:
         """Execute the algorithm against validated inputs and pre-loaded data.

@@ -8,6 +8,8 @@ surplus, and returns ``(Node, iteration)``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 
 from .iteration import Iteration
@@ -37,9 +39,7 @@ def egalitaire(iteration: Iteration) -> tuple[Node, Iteration]:
 
     iteration.compute_surplus()
     iteration.compute_surplus_total()
-    return Node(
-        name="egalitaire", iteration=iteration, surplus=iteration.surplus_total
-    ), iteration
+    return Node(name="egalitaire", iteration=iteration, surplus=iteration.surplus_total), iteration
 
 
 def prorata_total(iteration: Iteration) -> tuple[Node, Iteration]:
@@ -105,12 +105,10 @@ def prorata(iteration: Iteration) -> tuple[Node, Iteration]:
 
     iteration.compute_surplus()
     iteration.compute_surplus_total()
-    return Node(
-        name="prorata", iteration=iteration, surplus=iteration.surplus_total
-    ), iteration
+    return Node(name="prorata", iteration=iteration, surplus=iteration.surplus_total), iteration
 
 
-ALGOS: dict[str, callable] = {
+ALGOS: dict[str, Callable[[Iteration], tuple[Node, Iteration]]] = {
     "egalitaire": egalitaire,
     "prorata_total": prorata_total,
     "prorata": prorata,

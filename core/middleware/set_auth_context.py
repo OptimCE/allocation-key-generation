@@ -4,10 +4,10 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from core.context_vars import (
-    current_user_id,
     current_community_id,
-    current_user_role,
     current_source_ip,
+    current_user_id,
+    current_user_role,
 )
 
 
@@ -18,14 +18,12 @@ class GatewayScopeMiddleware(BaseHTTPMiddleware):
     without passing UserContext explicitly.
     """
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Build user context from headers (won't raise for unauthenticated routes).
         # Starlette headers are case-insensitive and return None for missing keys.
         user_id = request.headers.get("x-user-id")
         community_id = request.headers.get("x-community-id")
-        role = request.headers.get("x-user-role")  # or derive from orgs if needed
+        role = request.headers.get("x-user-orgs")  # or derive from orgs if needed
         source_ip = request.headers.get("x-source-ip")
 
         t1 = current_user_id.set(user_id)

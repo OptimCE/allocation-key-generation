@@ -42,7 +42,7 @@ def test_queue_depth_callback_emits_one_observation_per_algorithm(monkeypatch):
     monkeypatch.setitem(app_metrics.queue_depth_snapshot, "algo_a", 5)
     monkeypatch.setitem(app_metrics.queue_depth_snapshot, "algo_b", 0)
 
-    observations = list(app_metrics._queue_depth_callback(options=None))  # type: ignore[arg-type]
+    observations = list(app_metrics._queue_depth_callback(options=None))
 
     by_algo = {obs.attributes["algorithm"]: obs.value for obs in observations}
     assert by_algo == {"algo_a": 5, "algo_b": 0}
@@ -52,7 +52,7 @@ def test_queue_depth_callback_emits_nothing_when_snapshot_empty(monkeypatch):
     """No subscriptions, no observations — keeps Mimir series count sane."""
     monkeypatch.setattr(app_metrics, "queue_depth_snapshot", {})
 
-    observations = list(app_metrics._queue_depth_callback(options=None))  # type: ignore[arg-type]
+    observations = list(app_metrics._queue_depth_callback(options=None))
 
     assert observations == []
 

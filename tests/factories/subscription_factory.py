@@ -1,4 +1,5 @@
 import datetime
+from typing import cast
 
 import factory
 
@@ -36,18 +37,17 @@ class CommunitySubscriptionFactory(factory.Factory):
 
 async def create_community(session, **kwargs) -> Community:
     """Build a Community, attach to the session, flush. Never commit."""
-    community = CommunityFactory.build(**kwargs)
+    community = cast(Community, CommunityFactory.build(**kwargs))
     session.add(community)
     await session.flush()
     return community
 
 
-async def create_subscription(
-    session, *, id_community: int, **kwargs
-) -> CommunitySubscription:
+async def create_subscription(session, *, id_community: int, **kwargs) -> CommunitySubscription:
     """Build a CommunitySubscription, attach to the session, flush. Never commit."""
-    subscription = CommunitySubscriptionFactory.build(
-        id_community=id_community, **kwargs
+    subscription = cast(
+        CommunitySubscription,
+        CommunitySubscriptionFactory.build(id_community=id_community, **kwargs),
     )
     session.add(subscription)
     await session.flush()

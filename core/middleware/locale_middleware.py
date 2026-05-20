@@ -1,7 +1,8 @@
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+
 from core.context_vars import current_locale
-from core.i18n import SUPPORTED_LOCALES, DEFAULT_LOCALE
+from core.i18n import DEFAULT_LOCALE, SUPPORTED_LOCALES
 
 
 class LocaleMiddleware(BaseHTTPMiddleware):

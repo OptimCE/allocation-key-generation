@@ -1,4 +1,5 @@
 import datetime
+from typing import cast
 
 import factory
 
@@ -20,7 +21,7 @@ class GenerationFactory(factory.Factory):
         model = GenerationModel
 
     name = factory.Sequence(lambda n: f"Generation {n}")
-    file_url = "https://example.com/data.csv"
+    file_storage_key = factory.Sequence(lambda n: f"allocations/1/test-{n}/data.csv")
     file_name = "data.csv"
     injection_name = "production"
     algorithm_name = "brute_force"
@@ -70,7 +71,7 @@ class ConsumerGeneratedFactory(factory.Factory):
 
 
 async def create_generation(session, *, id_community: int, **kwargs) -> GenerationModel:
-    gen = GenerationFactory.build(id_community=id_community, **kwargs)
+    gen = cast(GenerationModel, GenerationFactory.build(id_community=id_community, **kwargs))
     session.add(gen)
     await session.flush()
     return gen
@@ -92,10 +93,13 @@ async def create_allocation_key_generated(
         gen = await create_generation(session, id_community=id_community)
         id_generation = gen.id
 
-    key = AllocationKeyGeneratedFactory.build(
-        id_community=id_community,
-        id_generation=id_generation,
-        **kwargs,
+    key = cast(
+        AllocationKeyGeneratedModel,
+        AllocationKeyGeneratedFactory.build(
+            id_community=id_community,
+            id_generation=id_generation,
+            **kwargs,
+        ),
     )
     session.add(key)
     await session.flush()
@@ -109,10 +113,13 @@ async def create_iteration_generated(
     id_allocation_key: int,
     **kwargs,
 ) -> IterationGeneratedModel:
-    iteration = IterationGeneratedFactory.build(
-        id_community=id_community,
-        id_allocation_key=id_allocation_key,
-        **kwargs,
+    iteration = cast(
+        IterationGeneratedModel,
+        IterationGeneratedFactory.build(
+            id_community=id_community,
+            id_allocation_key=id_allocation_key,
+            **kwargs,
+        ),
     )
     session.add(iteration)
     await session.flush()
@@ -126,10 +133,13 @@ async def create_consumer_generated(
     id_iteration: int,
     **kwargs,
 ) -> ConsumerGeneratedModel:
-    consumer = ConsumerGeneratedFactory.build(
-        id_community=id_community,
-        id_iteration=id_iteration,
-        **kwargs,
+    consumer = cast(
+        ConsumerGeneratedModel,
+        ConsumerGeneratedFactory.build(
+            id_community=id_community,
+            id_iteration=id_iteration,
+            **kwargs,
+        ),
     )
     session.add(consumer)
     await session.flush()
@@ -182,6 +192,7 @@ async def create_full_key_tree(
             )
 
     # Attach the ids as plain attributes so tests can reference them without
-    # touching the lazy-loaded `key.iterations` relationship.
-    key.iteration_ids = iteration_ids
+    # touching the lazy-loaded `key.iterations` relationship. The ORM model
+    # doesn't declare iteration_ids, so suppress the attribute-defined check.
+    key.iteration_ids = iteration_ids  # type: ignore[attr-defined]
     return key

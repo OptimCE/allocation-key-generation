@@ -1,15 +1,18 @@
 # core/security/dependencies.py
 import logging
 
-from fastapi import Depends, Query
+from fastapi import Depends
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.context_vars import current_user_id, current_community_id, current_user_role
+from core.context_vars import current_community_id, current_user_id, current_user_role
 from core.database.database import get_crm_session
+from core.database.models import CommunitySubscription
 from core.errors.errors import ErrorException
-from core.security.user_context import Role, ROLE_HIERARCHY
+from core.security.user_context import ROLE_HIERARCHY, Role
 from shared.const import FeatureName
 from shared.custom_errors import errors
+from shared.database.with_community import with_community_scope
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +44,7 @@ def require_min_role(min_role: Role):
         try:
             role = Role(role_str)
         except ValueError:
-            raise ErrorException(errors.auth.FORBIDDEN)
+            raise ErrorException(errors.auth.FORBIDDEN) from None
         if ROLE_HIERARCHY.get(role, 0) < min_rank:
             logger.warning(
                 "Min role check failed",
@@ -57,16 +60,13 @@ def require_min_role(min_role: Role):
     return _check
 
 
-async def _ensure_active_subscription(
-    feature: FeatureName, crm_session: AsyncSession
-) -> None:
-    # Imported here to avoid a circular import: api.subscription.repository
-    # imports from core.database, which transitively pulls this module.
-    from api.subscription.repository import SubscriptionRepository
-
+async def _ensure_active_subscription(feature: FeatureName, crm_session: AsyncSession) -> None:
     await require_community()
-    repo = SubscriptionRepository(crm_session)
-    sub = await repo.get_subscription(feature)
+    stmt = with_community_scope(select(CommunitySubscription), CommunitySubscription).where(
+        CommunitySubscription.feature == feature
+    )
+    result = await crm_session.execute(stmt)
+    sub = result.scalar_one_or_none()
     if sub is None or not sub.is_active:
         raise ErrorException(errors.subscription.NOT_SUBSCRIBED, status_code=403)
 
@@ -76,10 +76,3 @@ def require_feature(feature: FeatureName):
         await _ensure_active_subscription(feature, crm_session)
 
     return _check
-
-
-async def require_subscribed_feature(
-    feature: FeatureName = Query(...),
-    crm_session: AsyncSession = Depends(get_crm_session),
-) -> None:
-    await _ensure_active_subscription(feature, crm_session)

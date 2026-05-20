@@ -1,6 +1,7 @@
-import re
 import logging
-from core.security.user_context import Role, ROLE_HIERARCHY, OrgToken
+import re
+
+from core.security.user_context import ROLE_HIERARCHY, OrgToken, Role
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,8 @@ def parse_user_orgs(user_orgs: str) -> list[OrgToken]:
     Parses the x-user-orgs header injected by KrakenD/Keycloak.
 
     Example input:
-    [orgId:2c8a... orgPath:/aaaa roles:[ADMIN]],map[orgId:a221... orgPath:/bbbb roles:[MEMBER,MANAGER]]
+    [orgId:2c8a... orgPath:/aaaa roles:[ADMIN]],
+    map[orgId:a221... orgPath:/bbbb roles:[MEMBER,MANAGER]]
     """
     # Match each [...] block
     matches = re.findall(r"\[([^\]]+)\]", user_orgs)
@@ -32,9 +34,7 @@ def parse_user_orgs(user_orgs: str) -> list[OrgToken]:
             if highest is not None:
                 tokens.append(OrgToken(org_id=org_id, org_path=org_path, role=highest))
         except (IndexError, ValueError) as e:
-            logger.warning(
-                "Failed to parse org token", extra={"raw": match, "error": str(e)}
-            )
+            logger.warning("Failed to parse org token", extra={"raw": match, "error": str(e)})
             continue
 
     return tokens

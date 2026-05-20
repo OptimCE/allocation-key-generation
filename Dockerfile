@@ -1,4 +1,4 @@
-FROM python:3.12.3-slim
+FROM python:3.12-slim
 LABEL authors="EricUgoPaque"
 
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -6,8 +6,8 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 COPY requirements/ ./requirements/
-RUN pip install --upgrade pip \
-    && pip install -r requirements/all.txt
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -r requirements/testing.txt
 COPY . .
 EXPOSE 8000
 

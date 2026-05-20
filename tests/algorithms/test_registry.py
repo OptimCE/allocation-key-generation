@@ -62,19 +62,17 @@ def test_every_registered_algorithm_has_valid_metadata():
         assert isinstance(
             meta, AlgorithmMetadata
         ), f"registry entry is not AlgorithmMetadata: {type(meta).__name__}"
-        assert (
-            isinstance(meta.name, str) and meta.name
-        ), f"empty/invalid name on metadata: {meta!r}"
-        assert (
-            isinstance(meta.queue, str) and meta.queue
-        ), f"empty/invalid queue on metadata for {meta.name!r}"
-        assert (
-            isinstance(meta.description, str) and meta.description
-        ), f"empty description on metadata for {meta.name!r}"
-        assert isinstance(meta.input_schema, type), (
-            f"input_schema is not a class for {meta.name!r}: "
-            f"got {type(meta.input_schema).__name__}"
-        )
+        assert isinstance(meta.name, str), f"non-string name on metadata: {meta!r}"
+        assert meta.name, f"empty name on metadata: {meta!r}"
+        assert isinstance(meta.queue, str), f"non-string queue on metadata for {meta.name!r}"
+        assert meta.queue, f"empty queue on metadata for {meta.name!r}"
+        assert isinstance(
+            meta.description, str
+        ), f"non-string description on metadata for {meta.name!r}"
+        assert meta.description, f"empty description on metadata for {meta.name!r}"
+        assert isinstance(
+            meta.input_schema, type
+        ), f"input_schema is not a class for {meta.name!r}: got {type(meta.input_schema).__name__}"
         assert issubclass(
             meta.input_schema, BaseModel
         ), f"input_schema for {meta.name!r} does not subclass pydantic.BaseModel"
@@ -105,9 +103,7 @@ def test_registered_algorithm_names_are_unique():
     """
     metas = registry.list_all()
     names = [m.name for m in metas]
-    assert len(names) == len(
-        set(names)
-    ), f"duplicate algorithm names in registry: {names}"
+    assert len(names) == len(set(names)), f"duplicate algorithm names in registry: {names}"
 
 
 def test_register_metadata_rejects_duplicate_name():

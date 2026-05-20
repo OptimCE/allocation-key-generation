@@ -39,9 +39,7 @@ def autodiscover(load_implementations: bool = False) -> None:
         try:
             importlib.import_module(pkg_name)
         except Exception as e:
-            logger.exception(
-                "Failed to load metadata for '%s': %s", module_info.name, e
-            )
+            logger.exception("Failed to load metadata for '%s': %s", module_info.name, e)
             continue
 
         if load_implementations:
@@ -49,6 +47,4 @@ def autodiscover(load_implementations: bool = False) -> None:
             try:
                 importlib.import_module(impl_name)
             except Exception as e:
-                logger.exception(
-                    "Failed to load implementation for '%s': %s", module_info.name, e
-                )
+                logger.exception("Failed to load implementation for '%s': %s", module_info.name, e)

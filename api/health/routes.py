@@ -2,15 +2,12 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from redis.exceptions import RedisError
-
 from core import metrics as app_metrics
 from core.database.database import crm_engine
-from core.redis import redis_client
-from fastapi.responses import JSONResponse
 
 health_router = APIRouter()
 
@@ -36,16 +33,6 @@ async def check_nats() -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-async def check_redis() -> dict[str, Any]:
-    try:
-        if redis_client is None:
-            return {"ok": False, "error": "Redis client not initialised"}
-        await redis_client.ping()
-        return {"ok": True}
-    except RedisError as exc:
-        return {"ok": False, "error": str(exc)}
-
-
 @health_router.get("/liveness", tags=["Health"])
 async def liveness():
     return {"status": "alive"}
@@ -53,15 +40,13 @@ async def liveness():
 
 @health_router.get("/readiness", tags=["Health"])
 async def readiness() -> JSONResponse:
-    db_result, redis_result, nats_result = await asyncio.gather(
+    db_result, nats_result = await asyncio.gather(
         check_db(),
-        check_redis(),
         check_nats(),
     )
 
     checks = {
         "database": db_result,
-        "redis": redis_result,
         "nats": nats_result,
     }
 

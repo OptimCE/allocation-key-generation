@@ -51,9 +51,7 @@ def parse_file(content: bytes, file_name: str) -> pd.DataFrame:
     raise UnsupportedFileFormatError(f"Unsupported file extension: {extension!r}")
 
 
-def to_algorithm_raw_data(
-    dataframe: pd.DataFrame, injection_name: str
-) -> AlgorithmRawData:
+def to_algorithm_raw_data(dataframe: pd.DataFrame, injection_name: str) -> AlgorithmRawData:
     """Convert a parsed DataFrame into an ``AlgorithmRawData``.
 
     Layout:
@@ -64,9 +62,7 @@ def to_algorithm_raw_data(
       - ``consumer_names`` — column names excluding the injection column.
     """
     if injection_name not in dataframe.columns:
-        raise InvalidInjectionColumnError(
-            f"Injection column {injection_name!r} not found in file"
-        )
+        raise InvalidInjectionColumnError(f"Injection column {injection_name!r} not found in file")
 
     consumer_columns = [c for c in dataframe.columns if c != injection_name]
     consumption = dataframe[consumer_columns].to_numpy().transpose()

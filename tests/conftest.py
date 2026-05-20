@@ -22,14 +22,12 @@ Session isolation:
   join_transaction_mode="create_savepoint" ensures that any session.commit()
   inside route handlers issues RELEASE SAVEPOINT instead of a real COMMIT,
   keeping the outer transaction open for the final rollback.
-
-Redis:
-  fakeredis.aioredis.FakeRedis provides an in-memory Redis per test.
-  Injected via the get_redis dependency override on the client fixture.
 """
 
 import os
 import socket
+from collections.abc import AsyncGenerator
+from pathlib import Path
 
 # Force the test environment file (.env.test) BEFORE any project module is
 # imported. core.config.Settings reads ENV at import time to choose .env.<env>,
@@ -38,10 +36,9 @@ os.environ.setdefault("ENV", "test")
 
 import pytest
 import pytest_asyncio
-from fakeredis.aioredis import FakeRedis
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 from core.database.database import get_crm_session, get_local_session
 from main import app
@@ -129,22 +126,20 @@ def test_db_ready(request):
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema(test_db_ready):
     import asyncio
+
     import asyncpg
 
+    schema_sql = Path(SCHEMA_SQL).read_text(encoding="utf-8")
+    crm_test_schema_sql = Path(CRM_TEST_SCHEMA_SQL).read_text(encoding="utf-8")
+
     async def _apply():
-        conn = await asyncpg.connect(
-            "postgresql://postgres:postgres@localhost:5433/test_db_be"
-        )
-        with open(SCHEMA_SQL, "r", encoding="utf-8") as f:
-            await conn.execute(f.read())
-        with open(CRM_TEST_SCHEMA_SQL, "r", encoding="utf-8") as f:
-            await conn.execute(f.read())
+        conn = await asyncpg.connect("postgresql://postgres:postgres@localhost:5433/test_db_be")
+        await conn.execute(schema_sql)
+        await conn.execute(crm_test_schema_sql)
         await conn.close()
 
     async def _teardown():
-        conn = await asyncpg.connect(
-            "postgresql://postgres:postgres@localhost:5433/test_db_be"
-        )
+        conn = await asyncpg.connect("postgresql://postgres:postgres@localhost:5433/test_db_be")
         await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
         await conn.close()
 
@@ -169,7 +164,7 @@ def _register_algorithms():
     # being called twice (e.g., when conftest is reloaded).
     if "brute_force" not in registry:
         autodiscover()
-    yield
+    return
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +205,7 @@ def test_engine(apply_schema):
 
 
 @pytest_asyncio.fixture
-async def db_session(test_engine) -> AsyncSession:
+async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     """
     Wraps each test in a connection-level transaction rolled back on teardown.
 
@@ -232,32 +227,19 @@ async def db_session(test_engine) -> AsyncSession:
 
 
 # ---------------------------------------------------------------------------
-# Redis — in-memory fake, fresh per test
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def redis() -> FakeRedis:
-    """FakeRedis instance — in-memory, isolated per test, no teardown needed."""
-    return FakeRedis()
-
-
-# ---------------------------------------------------------------------------
-# HTTP client — full stack, session + redis injected, headers carry auth
+# HTTP client — full stack, session injected, headers carry auth
 # ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
 async def client(
     db_session: AsyncSession,
-    redis: FakeRedis,
-) -> AsyncClient:
+) -> AsyncGenerator[AsyncClient, None]:
     """
     Full HTTP stack via ASGITransport (no real network; ASGI lifespan NOT triggered).
 
     Dependency overrides:
       get_crm_session → per-test rolled-back AsyncSession (isolates DB writes)
-      get_redis       → FakeRedis instance (avoids real Redis; imported lazily)
 
     Auth: this service relies on the KrakenD gateway forwarding x-user-id,
     x-community-id, and x-user-role headers; GatewayScopeMiddleware turns those
@@ -275,17 +257,7 @@ async def client(
     # so the same per-test rolled-back session works for both bases.
     app.dependency_overrides[get_local_session] = _override_get_session
 
-    # get_redis is optional — only override if the module exists
-    try:
-        from core.redis import get_redis
-
-        app.dependency_overrides[get_redis] = lambda: redis
-    except ImportError:
-        pass
-
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
 
     app.dependency_overrides.clear()

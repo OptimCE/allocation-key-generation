@@ -26,7 +26,11 @@ CREATE TABLE IF NOT EXISTS schema_version (
 
 INSERT into schema_version (version, description) VALUES(
        1, 'First version'
-);
+) ON CONFLICT DO NOTHING;
+
+INSERT into schema_version (version, description) VALUES(
+       2, 'Rename generation.file_url to file_storage_key, widen to 512'
+) ON CONFLICT DO NOTHING;
 
 -- ---- generation ------------------------------------------------------------
 -- One row per allocation-key generation request. Holds the source file
@@ -39,7 +43,9 @@ CREATE TABLE IF NOT EXISTS generation (
     id_community       INTEGER NOT NULL,
 
     -- Source data
-    file_url           VARCHAR(255) NOT NULL,
+    -- file_storage_key is the object key inside STORAGE_BUCKET (MinIO). The
+    -- service uploads on creation; the worker deletes on terminal outcomes.
+    file_storage_key   VARCHAR(512) NOT NULL,
     file_name          VARCHAR(255) NOT NULL,
     injection_name     VARCHAR(255) NOT NULL,
 

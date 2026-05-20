@@ -40,9 +40,7 @@ class Consumer:
         self.energy_allocated_consumed = np.minimum(
             np.asarray(self.consumption), np.asarray(self.energy_allocated)
         )
-        self.energy_allocated_consumed_total = float(
-            np.sum(self.energy_allocated_consumed)
-        )
+        self.energy_allocated_consumed_total = float(np.sum(self.energy_allocated_consumed))
 
     def copy(self) -> "Consumer":
         new = Consumer(
@@ -53,9 +51,7 @@ class Consumer:
             self.energy_allocated_percentage_time, copy=True
         )
         new.energy_allocated = np.array(self.energy_allocated, copy=True)
-        new.energy_allocated_consumed = np.array(
-            self.energy_allocated_consumed, copy=True
-        )
+        new.energy_allocated_consumed = np.array(self.energy_allocated_consumed, copy=True)
         new.energy_allocated_consumed_total = self.energy_allocated_consumed_total
         new.residual_volume = np.array(self.residual_volume, copy=True)
         new.residual_volume_total = self.residual_volume_total

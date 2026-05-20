@@ -1,8 +1,7 @@
-from sqlalchemy import Float
-from sqlalchemy.orm import relationship
 import datetime
-from sqlalchemy import ForeignKey, Integer, TIMESTAMP, String
-from sqlalchemy.orm import Mapped, mapped_column
+
+from sqlalchemy import TIMESTAMP, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database.database import CrmBase
 
@@ -11,22 +10,22 @@ class AllocationKeyModel(CrmBase):
     __tablename__ = "allocation_key"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
+        TIMESTAMP,
         nullable=False,
-        default=lambda: datetime.datetime.now(datetime.UTC),
+        default=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
+        TIMESTAMP,
         nullable=False,
-        default=lambda: datetime.datetime.now(datetime.UTC),
-        onupdate=lambda: datetime.datetime.now(datetime.UTC),
+        default=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+        onupdate=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
     )
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
     )
     description: Mapped[str] = mapped_column(
-        String(255),
+        Text,
         nullable=False,
     )
     iterations: Mapped[list["IterationModel"]] = relationship(
@@ -42,15 +41,15 @@ class IterationModel(CrmBase):
     __tablename__ = "iteration"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
+        TIMESTAMP,
         nullable=False,
-        default=lambda: datetime.datetime.now(datetime.UTC),
+        default=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
+        TIMESTAMP,
         nullable=False,
-        default=lambda: datetime.datetime.now(datetime.UTC),
-        onupdate=lambda: datetime.datetime.now(datetime.UTC),
+        default=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+        onupdate=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
     )
     number: Mapped[int] = mapped_column(
         Integer,
@@ -64,7 +63,7 @@ class IterationModel(CrmBase):
         "ConsumerModel", lazy="select", back_populates="iteration"
     )
 
-    id_allocation_key: Mapped[int] = mapped_column(
+    id_key: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("allocation_key.id"),
         nullable=False,
@@ -82,15 +81,15 @@ class ConsumerModel(CrmBase):
     __tablename__ = "consumer"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
+        TIMESTAMP,
         nullable=False,
-        default=lambda: datetime.datetime.now(datetime.UTC),
+        default=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
+        TIMESTAMP,
         nullable=False,
-        default=lambda: datetime.datetime.now(datetime.UTC),
-        onupdate=lambda: datetime.datetime.now(datetime.UTC),
+        default=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+        onupdate=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
     )
     name: Mapped[str] = mapped_column(
         String(255),

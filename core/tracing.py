@@ -1,18 +1,18 @@
 import logging
 
-from opentelemetry import trace, metrics
-from opentelemetry.trace import Status, StatusCode
-
-from core.config import settings, Environment
-from core.context_vars import current_user_id, current_user_role, current_request_id
-from core.logging import RequestIdFilter
-from opentelemetry.sdk.resources import Resource
+from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.trace import Status, StatusCode
+
+from core.config import Environment, settings
+from core.context_vars import current_request_id, current_user_id, current_user_role
+from core.logging import RequestIdFilter
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +54,7 @@ def setup_tracer_provider() -> None:
         headers=headers,
         timeout=EXPORTER_TIMEOUT_MS,
     )
-    metric_reader = PeriodicExportingMetricReader(
-        metric_exporter, export_interval_millis=15000
-    )
+    metric_reader = PeriodicExportingMetricReader(metric_exporter, export_interval_millis=15000)
     meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
     metrics.set_meter_provider(meter_provider)
 
@@ -91,9 +89,8 @@ async def enrich_span():
     try:
         yield
     finally:
-        if span and span.is_recording():
-            if span.status.status_code == StatusCode.UNSET:  # type: ignore[attr-defined]  # status is on ReadableSpan, not the abstract Span type
-                span.set_status(Status(StatusCode.OK))
+        if span and span.is_recording() and span.status.status_code == StatusCode.UNSET:
+            span.set_status(Status(StatusCode.OK))
 
 
 def add_attribute(key: str, value) -> None:

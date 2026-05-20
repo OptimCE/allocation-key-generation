@@ -7,18 +7,27 @@ same queue group will share work via JetStream.
 
 Message handling follows a strict failure-class matrix:
 
-* **Deterministic failures** (bad URL, bad file, bad inputs, algorithm
-  exception) — mark the generation row FAILED with an error message
-  and ack the message. We never want JetStream to redeliver a poison
-  pill that will fail the same way every time.
-* **Transient failures** (network timeout, 5xx from storage, DB
-  connection lost mid-persist) — nak the message so JetStream
-  redelivers. We do not touch the row's status; the next delivery will
-  retry from scratch.
+* **Deterministic failures** (object missing, bad file, bad inputs,
+  algorithm exception) — mark the generation row FAILED with an error
+  message and ack the message. We never want JetStream to redeliver a
+  poison pill that will fail the same way every time.
+* **Transient failures** (storage 5xx/timeout, DB connection lost
+  mid-persist) — nak the message so JetStream redelivers. We do not
+  touch the row's status; the next delivery will retry from scratch.
 
 The dispatcher never holds a DB session while running an algorithm —
 each step opens its own short-lived session, matching the architecture
 agreed in the plan.
+
+File-storage cleanup contract
+-----------------------------
+The service uploads the source file to MinIO at creation time. The
+worker owns the file from that point on and is responsible for deleting
+it once the row reaches a terminal status. Cleanup happens **only** on
+terminal outcomes (SUCCESS, deterministic FAILURE) — never on transient
+NAKs, because the next delivery still needs to read the file. The single
+cleanup point is the ``handle`` wrapper's call to ``_delete_safely``
+after a successful ``_process`` return.
 """
 
 from __future__ import annotations
@@ -26,9 +35,8 @@ from __future__ import annotations
 import dataclasses
 import logging
 import time
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-import httpx
 from nats.aio.msg import Msg
 from nats.js import JetStreamContext
 from nats.js.api import ConsumerConfig
@@ -37,12 +45,12 @@ from pydantic import ValidationError
 from algorithms.base import AlgorithmMetadata
 from algorithms.registry import registry
 from core import metrics as app_metrics
+from core import storage
 from core.database.database import AsyncSessionLocalFactory
 from core.queue.helper import Event
 from shared import data_loading
 from shared.const import GenerationStatus
 from shared.models.local_models import GenerationModel
-from worker import http_client as http_client_module
 from worker import persistence
 
 logger = logging.getLogger(__name__)
@@ -63,7 +71,7 @@ class _GenerationSnapshot:
     """Per-message snapshot of the row, captured before the session closes."""
 
     id: int
-    file_url: str
+    file_storage_key: str
     file_name: str
     injection_name: str
     inputs: dict
@@ -71,16 +79,28 @@ class _GenerationSnapshot:
     status: int
 
 
+@dataclasses.dataclass(frozen=True)
+class _Terminal:
+    """Returned by ``_process`` whenever it ends in a terminal state.
+
+    The handler reads ``storage_key`` (when not None) and best-effort
+    deletes the file. ``_TransientError`` is raised instead of returned
+    when the message must be redelivered — in that case no file deletion
+    happens, since the next attempt still needs to read it.
+    """
+
+    storage_key: str | None
+
+
 async def subscribe_algorithm(
     js: JetStreamContext,
     meta: AlgorithmMetadata,
-    http: httpx.AsyncClient,
 ):
     """Subscribe the worker to a single algorithm's NATS subject.
 
     Returns the subscription so the caller can drain it on shutdown.
     """
-    handler = _make_handler(meta, http)
+    handler = _make_handler(meta)
     sub = await js.subscribe(
         subject=meta.queue,
         durable=f"worker-{meta.name}",
@@ -93,31 +113,23 @@ async def subscribe_algorithm(
     return sub
 
 
-def _make_handler(
-    meta: AlgorithmMetadata, http: httpx.AsyncClient
-) -> Callable[[Msg], Awaitable[None]]:
+def _make_handler(meta: AlgorithmMetadata) -> Callable[[Msg], Awaitable[None]]:
     """Build the per-message callback for ``meta``.
 
-    Closes over ``meta`` and ``http`` so each subscription has its own
-    pre-bound handler with no global lookups on the hot path.
+    Closes over ``meta`` so each subscription has its own pre-bound
+    handler with no global lookups on the hot path.
     """
 
     async def handle(msg: Msg) -> None:
         try:
             event = Event.decode(msg.data)
         except Exception:
-            logger.exception(
-                "Failed to decode event on %s; acking and dropping", meta.queue
-            )
+            logger.exception("Failed to decode event on %s; acking and dropping", meta.queue)
             await msg.ack()
-            app_metrics.worker_messages.add(
-                1, {"algorithm": meta.name, "outcome": "drop_decode"}
-            )
+            app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "drop_decode"})
             return
 
-        generation_id = (
-            event.data.get("generation_id") if isinstance(event.data, dict) else None
-        )
+        generation_id = event.data.get("generation_id") if isinstance(event.data, dict) else None
         if not isinstance(generation_id, int):
             logger.error(
                 "Event on %s has missing/invalid generation_id: %r",
@@ -131,7 +143,7 @@ def _make_handler(
             return
 
         try:
-            await _process(meta, http, generation_id, msg)
+            outcome = await _process(meta, generation_id, msg)
         except _TransientError as exc:
             logger.warning(
                 "Transient failure for generation %d, will redeliver: %s",
@@ -139,9 +151,8 @@ def _make_handler(
                 exc,
             )
             await msg.nak(delay=_NAK_RETRY_DELAY_SECONDS)
-            app_metrics.worker_messages.add(
-                1, {"algorithm": meta.name, "outcome": "nak"}
-            )
+            app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "nak"})
+            return
         except Exception:
             # Catch-all so the subscription never dies. We treat unexpected
             # errors as deterministic — better to mark the row FAILED with
@@ -149,77 +160,77 @@ def _make_handler(
             logger.exception("Unhandled error processing generation %d", generation_id)
             await persistence.save_failure(generation_id, "unhandled_worker_error")
             await msg.ack()
-            app_metrics.worker_messages.add(
-                1, {"algorithm": meta.name, "outcome": "ack_unhandled"}
-            )
+            app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "ack_unhandled"})
+            return
+
+        await msg.ack()
+        if outcome.storage_key is not None:
+            await _delete_safely(outcome.storage_key)
 
     return handle
 
 
 class _TransientError(Exception):
-    """Raised inside ``_process`` to signal the message should be NAK'd."""
+    """Raised inside ``_process`` to signal the message should be NAK'd.
+
+    The cleanup contract relies on this being raised (not returned): when
+    the handler catches it, the file is left in place so the redelivered
+    message can still read it.
+    """
 
 
 async def _process(
     meta: AlgorithmMetadata,
-    http: httpx.AsyncClient,
     generation_id: int,
     msg: Msg,
-) -> None:
+) -> _Terminal:
     """The pipeline for a single generation message.
 
-    Raises ``_TransientError`` for failures that should be redelivered.
-    Marks the row FAILED + acks the message for deterministic failures.
-    Acks the message and returns on success.
+    Returns ``_Terminal`` for terminal outcomes (the handler then acks +
+    deletes). Raises ``_TransientError`` for failures that should be
+    redelivered (no file deletion).
     """
     # ---- Step 1: snapshot the row, then close the session --------------
     snapshot = await _snapshot_generation(generation_id)
     if snapshot is None:
         logger.warning("Generation %d not found in DB; acking message", generation_id)
-        await msg.ack()
-        return
+        return _Terminal(storage_key=None)
 
     if snapshot.status != GenerationStatus.PENDING:
         # Likely a redelivery after we successfully persisted but failed
-        # to ack. Nothing to do; just ack and move on.
+        # to ack. The first delivery's cleanup may already have deleted
+        # the file; ask for delete anyway — storage.delete is idempotent.
         logger.info(
             "Generation %d already in status %d; acking redelivery",
             generation_id,
             snapshot.status,
         )
-        await msg.ack()
-        return
+        return _Terminal(storage_key=snapshot.file_storage_key)
 
     # ---- Step 2: download the source file ------------------------------
     try:
-        content = await http_client_module.download(http, snapshot.file_url)
-    except httpx.HTTPStatusError as exc:
-        if 500 <= exc.response.status_code < 600:
-            raise _TransientError(f"download {exc.response.status_code}") from exc
-        await persistence.save_failure(
-            generation_id, f"download_failed: HTTP {exc.response.status_code}"
-        )
-        await msg.ack()
-        return
-    except (httpx.TimeoutException, httpx.TransportError) as exc:
-        raise _TransientError(f"download transport: {exc}") from exc
+        content = await storage.download(snapshot.file_storage_key)
+    except storage.ObjectNotFound:
+        # The object is gone — possibly a previous run cleaned it up but
+        # the row was somehow still PENDING (admin intervention, partial
+        # crash). Terminal: mark FAILED and ack. Nothing left to delete.
+        await persistence.save_failure(generation_id, "storage_object_missing")
+        return _Terminal(storage_key=None)
+    except storage.TransientStorageError as exc:
+        raise _TransientError(f"storage download: {exc}") from exc
 
     # ---- Step 3: parse the file into the algorithm raw-data triple -----
     try:
-        raw_data = data_loading.load(
-            content, snapshot.file_name, snapshot.injection_name
-        )
+        raw_data = data_loading.load(content, snapshot.file_name, snapshot.injection_name)
     except (
         data_loading.InvalidInjectionColumnError,
         data_loading.UnsupportedFileFormatError,
     ) as exc:
         await persistence.save_failure(generation_id, f"parse_failed: {exc}")
-        await msg.ack()
-        return
+        return _Terminal(storage_key=snapshot.file_storage_key)
     except Exception as exc:
         await persistence.save_failure(generation_id, f"parse_failed_unexpected: {exc}")
-        await msg.ack()
-        return
+        return _Terminal(storage_key=snapshot.file_storage_key)
 
     # ---- Step 4: re-validate inputs against the algorithm schema -------
     # Defensive: the API validates these on creation, but a row written
@@ -228,11 +239,8 @@ async def _process(
     try:
         algo_input = meta.input_schema.model_validate(snapshot.inputs)
     except ValidationError as exc:
-        await persistence.save_failure(
-            generation_id, f"invalid_inputs: {exc.errors()[:5]}"
-        )
-        await msg.ack()
-        return
+        await persistence.save_failure(generation_id, f"invalid_inputs: {exc.errors()[:5]}")
+        return _Terminal(storage_key=snapshot.file_storage_key)
 
     # ---- Step 5: run the algorithm (no DB session held) ----------------
     try:
@@ -240,11 +248,8 @@ async def _process(
     except KeyError:
         # Should be impossible — we only subscribe to algorithms whose
         # implementation was loaded by autodiscover. Defensive guard.
-        await persistence.save_failure(
-            generation_id, f"implementation_missing: {meta.name}"
-        )
-        await msg.ack()
-        return
+        await persistence.save_failure(generation_id, f"implementation_missing: {meta.name}")
+        return _Terminal(storage_key=snapshot.file_storage_key)
 
     start = time.perf_counter()
     try:
@@ -258,12 +263,9 @@ async def _process(
         )
         # Algorithm exceptions are deterministic by definition: the same
         # inputs will fail the same way on redelivery. Ack and move on.
-        logger.exception(
-            "Algorithm %s raised for generation %d", meta.name, generation_id
-        )
+        logger.exception("Algorithm %s raised for generation %d", meta.name, generation_id)
         await persistence.save_failure(generation_id, f"algorithm_failed: {exc}")
-        await msg.ack()
-        return
+        return _Terminal(storage_key=snapshot.file_storage_key)
     app_metrics.generation_duration.record(
         time.perf_counter() - start,
         {"algorithm": meta.name, "status": "success"},
@@ -275,11 +277,20 @@ async def _process(
     except Exception as exc:
         # DB-level failures during persist are most likely transient
         # (connection drop, deadlock). Let JetStream redeliver so the
-        # next attempt has a fresh session.
+        # next attempt has a fresh session. Do NOT delete the file here.
         raise _TransientError(f"persist failed: {exc}") from exc
 
-    await msg.ack()
     logger.info("Generation %d processed successfully", generation_id)
+    return _Terminal(storage_key=snapshot.file_storage_key)
+
+
+async def _delete_safely(key: str) -> None:
+    """Best-effort delete; ``storage.delete`` already swallows its own errors.
+
+    Wrapped so future instrumentation (e.g. counting leaked objects) has a
+    single place to hook in.
+    """
+    await storage.delete(key)
 
 
 async def _snapshot_generation(generation_id: int) -> _GenerationSnapshot | None:
@@ -294,7 +305,7 @@ async def _snapshot_generation(generation_id: int) -> _GenerationSnapshot | None
             return None
         return _GenerationSnapshot(
             id=row.id,
-            file_url=row.file_url,
+            file_storage_key=row.file_storage_key,
             file_name=row.file_name,
             injection_name=row.injection_name,
             inputs=dict(row.inputs) if row.inputs else {},

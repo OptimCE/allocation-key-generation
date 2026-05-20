@@ -1,17 +1,17 @@
 import logging
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from core.errors.errors import ErrorException
+
 from core.context_vars import current_locale, current_request_id
+from core.errors.errors import ErrorException
 from core.i18n import translate
 from core.tracing import add_exception
 
 logger = logging.getLogger(__name__)
 
 
-async def error_exception_handler(
-    request: Request, exc: ErrorException
-) -> JSONResponse:
+async def error_exception_handler(request: Request, exc: ErrorException) -> JSONResponse:
     """
     Handles all ErrorException instances raised anywhere in the request lifecycle.
     Resolves the translation key using the current request's locales ContextVar.
@@ -57,11 +57,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
     locale = current_locale.get()
     # Generic fallback message — add ERRORS.INTERNAL to fr.json if you want a custom string
-    message = (
-        translate("ERRORS.INTERNAL", locale=locale)
-        if False
-        else "Erreur interne du serveur"
-    )
+    message = translate("ERRORS.INTERNAL", locale=locale) if False else "Erreur interne du serveur"
 
     response = JSONResponse(
         status_code=500,

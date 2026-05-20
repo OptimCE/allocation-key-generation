@@ -1,23 +1,22 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends
+from fastapi import Depends, FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.middleware.cors import CORSMiddleware
 
 from algorithms import autodiscover
 from api.generation.routes import generation_routes
 from api.health.routes import health_router
-from api.subscription.routes import subscription_routes
-from core.config import settings, Environment
-from core.logging import configure_logging
-from core.errors.handlers import error_exception_handler, unhandled_exception_handler
+from core.config import Environment, settings
 from core.errors.errors import ErrorException
+from core.errors.handlers import error_exception_handler, unhandled_exception_handler
+from core.logging import configure_logging
 from core.middleware.correlation_id import CorrelationIdMiddleware
 from core.middleware.locale_middleware import LocaleMiddleware
 from core.middleware.request_limits import RequestLimitsMiddleware
 from core.middleware.set_auth_context import GatewayScopeMiddleware
-from core.queue.init import init_nats, close_nats
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from core.queue.init import close_nats, init_nats
 from core.tracing import enrich_span, setup_tracer_provider
 
 configure_logging()
@@ -70,11 +69,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 
 # --- Routers ---
 app.include_router(
-    subscription_routes, prefix="", tags=["Subscription"], dependencies=protected_deps
-)
-app.include_router(
     generation_routes,
-    prefix="/generation",
     tags=["Generation"],
     dependencies=protected_deps,
 )
@@ -86,4 +81,4 @@ FastAPIInstrumentor.instrument_app(app)
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host="0.0.0.0", port=8002)  # noqa: S104  # container-internal API behind KrakenD gateway

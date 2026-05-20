@@ -1,8 +1,10 @@
+from typing import cast
+
 import cvxpy as cp
 import numpy as np
 
-from .key import Key
 from .iteration import Iteration
+from .key import Key
 from .solution import Solution
 
 
@@ -15,9 +17,7 @@ class WarmStartSolver:
     using CVXPY warm-start to cut iteration cost.
     """
 
-    def __init__(
-        self, c_shape: tuple[int, int], va_shape: tuple[int, int], max_iter: int
-    ) -> None:
+    def __init__(self, c_shape: tuple[int, ...], va_shape: tuple[int, ...], max_iter: int) -> None:
         self.max_iter = max_iter
         self.VAP = cp.Variable((c_shape[0], c_shape[0]), diag=True)
         self.VA = cp.Parameter((va_shape[0], va_shape[1]), nonneg=True)
@@ -35,8 +35,15 @@ class WarmStartSolver:
         self.VA.value = VA
         self.C.value = C
         self.problem.solve(max_iter=self.max_iter, warm_start=True)
+        # cvxpy declares .value as ndarray | None; populated after a feasible
+        # solve. Callers gate further use on Solution.status == "optimal".
         return Solution(
-            self.problem.status, self.VAP.value, VA, C, self.VAPA.value, self.E.value
+            self.problem.status,
+            cast(np.ndarray, self.VAP.value),
+            VA,
+            C,
+            cast(np.ndarray, self.VAPA.value),
+            cast(np.ndarray, self.E.value),
         )
 
     @staticmethod
@@ -63,19 +70,17 @@ class WarmStartSolver:
         """Solve successive iterations for a single GA candidate, returning
         only the final ``Solution`` (used to compute the fitness score)."""
         current_C = C
-        current = None
+        current: Solution | None = None
         for i in range(num_iterations):
             if i == 0:
                 current = self._solve(VA * allocation_iteration[i], current_C)
             else:
+                if current is None:
+                    raise RuntimeError("current must be populated by the i == 0 branch")
                 prev_iter = current.to_iteration(allocation_iteration[i])
-                surplus_carry = self._surplus_from_previous_iteration(
-                    prev_iter.consumers
-                )
+                surplus_carry = self._surplus_from_previous_iteration(prev_iter.consumers)
                 va_effective = VA * allocation_iteration[i] + surplus_carry
-                current_C = (
-                    current_C - current.VAPA + np.abs(current_C - current.VAPA)
-                ) / 2
+                current_C = (current_C - current.VAPA + np.abs(current_C - current.VAPA)) / 2
                 current = self._solve(va_effective, current_C)
             if current.status != "optimal":
                 break
@@ -100,14 +105,12 @@ class WarmStartSolver:
                 if current.status != "optimal":
                     break
             else:
+                if current is None:
+                    raise RuntimeError("current must be populated by the i == 0 branch")
                 prev_iter = current.to_iteration(allocation_iteration[i])
-                surplus_carry = self._surplus_from_previous_iteration(
-                    prev_iter.consumers
-                )
+                surplus_carry = self._surplus_from_previous_iteration(prev_iter.consumers)
                 va_effective = VA * allocation_iteration[i] + surplus_carry
-                current_C = (
-                    current_C - current.VAPA + np.abs(current_C - current.VAPA)
-                ) / 2
+                current_C = (current_C - current.VAPA + np.abs(current_C - current.VAPA)) / 2
                 current = self._solve(va_effective, current_C)
                 if current.status != "optimal":
                     break

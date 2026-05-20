@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 import random
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 
@@ -102,9 +102,7 @@ class OlagsaGA:
         segments.append(Segment(start, end))
         return segments
 
-    def _divide_triangle(
-        self, vertices: list[Coordinate3D], depth: int
-    ) -> list[Triangle]:
+    def _divide_triangle(self, vertices: list[Coordinate3D], depth: int) -> list[Triangle]:
         a, b, c = vertices
         if depth == 0:
             return [Triangle(a, b, c)]
@@ -172,8 +170,12 @@ class OlagsaGA:
         return lambda x: seg.point_within(x)
 
     @staticmethod
-    def _triangle_contains(tri: Triangle) -> Callable[[Coordinate3D], bool]:
-        return lambda x: tri.point_within(x)
+    def _triangle_contains(tri: Triangle) -> Callable[[Coordinate], bool]:
+        # Specie.is_same_specie is typed Callable[[Coordinate], bool] for both
+        # 2D and 3D cases; the 3D path only runs with Coordinate3D inputs at
+        # runtime (see _chromosome_to_coordinate), so the narrower lambda is
+        # safe to widen here.
+        return lambda x: tri.point_within(x)  # type: ignore[arg-type]
 
     # ---- GA primitives ----------------------------------------------------
     def _random_allocation(self) -> list[float]:
@@ -192,22 +194,18 @@ class OlagsaGA:
         return Individual(mutated, 0.0)
 
     def _initialize_population(self) -> list[Individual]:
-        return [
-            Individual(self._random_allocation(), 0.0)
-            for _ in range(self.population_size)
-        ]
+        return [Individual(self._random_allocation(), 0.0) for _ in range(self.population_size)]
 
     def _evaluate(self, individual: Individual) -> Individual:
-        assert self._solver is not None and self._C is not None and self._VA is not None
+        if self._solver is None or self._C is None or self._VA is None:
+            raise RuntimeError("solver not initialized — call setup() before _evaluate")
         solution = self._solver.solve_genetic(
             self.num_key_iteration, self._C, self._VA, individual.chromosomes
         )
         if solution is None or solution.status != "optimal":
             individual.fitness = 100 * self.PONDERATION_EXCEDENT
         else:
-            individual.fitness = (
-                1 / (np.sum(solution.E) + 1)
-            ) * self.PONDERATION_EXCEDENT
+            individual.fitness = (1 / (np.sum(solution.E) + 1)) * self.PONDERATION_EXCEDENT
         return individual
 
     @staticmethod
@@ -225,9 +223,7 @@ class OlagsaGA:
             return Coordinate(chromosome[0], chromosome[1])
         return Coordinate3D(chromosome[0], chromosome[1], chromosome[2])
 
-    def _assign_species(
-        self, population: list[Individual], species: list[Specie]
-    ) -> list[Specie]:
+    def _assign_species(self, population: list[Individual], species: list[Specie]) -> list[Specie]:
         for individual in population:
             point = self._chromosome_to_coordinate(individual.chromosomes)
             for specie in species:
@@ -257,9 +253,7 @@ class OlagsaGA:
         specie.individuals = specie.individuals[: len(specie.individuals) // 2]
         return specie
 
-    def _crossover_chromosomes(
-        self, parent_a: Individual, parent_b: Individual
-    ) -> list[float]:
+    def _crossover_chromosomes(self, parent_a: Individual, parent_b: Individual) -> list[float]:
         point = random.randint(0, len(parent_a.chromosomes) - 1)
         if random.randint(0, 1) == 0:
             offspring = parent_a.chromosomes[:point] + parent_b.chromosomes[point:]
@@ -278,9 +272,7 @@ class OlagsaGA:
             offspring = self._crossover_chromosomes(parent_a, parent_b)
         else:
             offspring = list(
-                parent_a.chromosomes
-                if random.randint(0, 1) == 0
-                else parent_b.chromosomes
+                parent_a.chromosomes if random.randint(0, 1) == 0 else parent_b.chromosomes
             )
         return Individual(offspring, 0.0)
 
@@ -296,8 +288,7 @@ class OlagsaGA:
             dist = math.sqrt(
                 (specie.centroid.x - other.centroid.x) ** 2
                 + (specie.centroid.y - other.centroid.y) ** 2
-                + (getattr(specie.centroid, "z", 0) - getattr(other.centroid, "z", 0))
-                ** 2
+                + (getattr(specie.centroid, "z", 0) - getattr(other.centroid, "z", 0)) ** 2
             )
             if dist < min_distance:
                 min_distance = dist
@@ -348,23 +339,16 @@ class OlagsaGA:
                 else:
                     specie.best_fitness = specie.individuals[0].fitness
                     specie.iteration_without_improvement = 0
-                if (
-                    specie.iteration_without_improvement
-                    >= self.max_iteration_without_improvement
-                ):
+                if specie.iteration_without_improvement >= self.max_iteration_without_improvement:
                     no_improvement[i] = True
 
             if all(no_improvement):
                 break
 
-            species = [
-                self._apply_adjusted_fitness(s) for s in species if s.individuals
-            ]
+            species = [self._apply_adjusted_fitness(s) for s in species if s.individuals]
             species = [self._cull_weakest(s) for s in species]
 
-            total_adjusted = sum(
-                ind.adjusted_fitness for s in species for ind in s.individuals
-            )
+            total_adjusted = sum(ind.adjusted_fitness for s in species for ind in s.individuals)
             if total_adjusted == 0:
                 break
 
@@ -377,7 +361,7 @@ class OlagsaGA:
                 num_children.append(int(ratio * self.population_size))
 
             new_children: list[Individual] = []
-            for specie, count in zip(species, num_children):
+            for specie, count in zip(species, num_children, strict=False):
                 for _ in range(count):
                     if (
                         self.species_waited > 1

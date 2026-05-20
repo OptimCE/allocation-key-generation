@@ -1,7 +1,7 @@
 import datetime
 from typing import Any
 
-from sqlalchemy import Float, ForeignKey, Integer, String, TIMESTAMP, Text
+from sqlalchemy import TIMESTAMP, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -19,7 +19,10 @@ class GenerationModel(LocalBase):
     id_community: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # --- Source data ---
-    file_url: Mapped[str] = mapped_column(String(255), nullable=False)
+    # file_storage_key is the object key inside STORAGE_BUCKET (MinIO). The
+    # service uploads the user-supplied file at creation time; the worker
+    # deletes it once the row reaches SUCCESS or FAILED.
+    file_storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     # Name of the column inside the uploaded file that holds the shared
     # production profile (the "injection"). Shared across all algorithms.

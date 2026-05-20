@@ -12,8 +12,8 @@ CREATE TABLE IF NOT EXISTS community (
     id                INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name              VARCHAR(255) NOT NULL UNIQUE,
     auth_community_id VARCHAR(255) NOT NULL UNIQUE,
-    created_at        TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at        TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS community_subscription (
@@ -38,20 +38,20 @@ CREATE INDEX IF NOT EXISTS idx_community_subscription_id_community
 CREATE TABLE IF NOT EXISTS allocation_key (
     id           INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name         VARCHAR(255) NOT NULL,
-    description  VARCHAR(255) NOT NULL,
+    description  TEXT         NOT NULL,
     id_community INTEGER      NOT NULL,
-    created_at   TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at   TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS iteration (
     id                          INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     number                      INTEGER NOT NULL,
     energy_allocated_percentage DOUBLE PRECISION NOT NULL,
-    id_allocation_key           INTEGER NOT NULL REFERENCES allocation_key(id),
+    id_key                      INTEGER NOT NULL REFERENCES allocation_key(id),
     id_community                INTEGER NOT NULL,
-    created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS consumer (
@@ -60,6 +60,6 @@ CREATE TABLE IF NOT EXISTS consumer (
     energy_allocated_percentage DOUBLE PRECISION NOT NULL,
     id_iteration                INTEGER NOT NULL REFERENCES iteration(id),
     id_community                INTEGER NOT NULL,
-    created_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

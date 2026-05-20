@@ -57,6 +57,7 @@ def test_request_id_filter_injects_all_context_vars_when_set():
                 current_user_id,
                 current_request_id,
             ),
+            strict=False,
         ):
             var.reset(token)
 

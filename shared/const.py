@@ -1,4 +1,4 @@
-from enum import Enum, IntEnum
+from enum import IntEnum, StrEnum
 
 
 class GenerationStatus(IntEnum):
@@ -7,6 +7,6 @@ class GenerationStatus(IntEnum):
     FAILED = 2
 
 
-class FeatureName(str, Enum):
+class FeatureName(StrEnum):
     ALGORITHM = "algorithm"
     # SIMULATION = "simulation"  # future

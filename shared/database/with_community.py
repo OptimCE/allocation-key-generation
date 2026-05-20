@@ -1,14 +1,10 @@
-from typing import TypeVar
-
 from sqlalchemy import false
 from sqlalchemy.sql import Select
 
 from core.context_vars import current_internal_community_id
 
-TStmt = TypeVar("TStmt", bound=Select)
 
-
-def with_community_scope(stmt: TStmt, model: type) -> TStmt:
+def with_community_scope[TStmt: Select](stmt: TStmt, model: type) -> TStmt:
     """
     Automatically applies the community filter based on the current request context.
 

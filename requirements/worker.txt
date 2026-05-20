@@ -8,6 +8,3 @@ cvxpy==1.6.3
 
 # Excel parsing for the shared data loader.
 openpyxl==3.1.5
-
-# HTTP client for downloading source data files referenced by GenerationModel.file_url.
-httpx==0.28.1

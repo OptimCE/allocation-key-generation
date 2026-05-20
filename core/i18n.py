@@ -1,7 +1,8 @@
 import json
 import logging
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -10,17 +11,16 @@ SUPPORTED_LOCALES = {"fr", "en", "de", "nl"}
 DEFAULT_LOCALE = "fr"
 
 
-@lru_cache(maxsize=None)
-def _load_locale(locale: str) -> dict:
+@cache
+def _load_locale(locale: str) -> dict[str, Any]:
     """Loads and caches a locales file. Called once per locales at runtime."""
     path = LOCALES_DIR / f"{locale}.json"
     if not path.exists():
-        logger.warning(
-            f"Locale file not found: {path}. Falling back to {DEFAULT_LOCALE}."
-        )
+        logger.warning(f"Locale file not found: {path}. Falling back to {DEFAULT_LOCALE}.")
         path = LOCALES_DIR / f"{DEFAULT_LOCALE}.json"
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        data: dict[str, Any] = json.load(f)
+        return data
 
 
 def translate(key: str, locale: str = DEFAULT_LOCALE) -> str:
@@ -41,9 +41,7 @@ def translate(key: str, locale: str = DEFAULT_LOCALE) -> str:
     node = data
     for part in parts:
         if not isinstance(node, dict) or part not in node:
-            logger.warning(
-                f"Translation key not found: '{key}' in locales '{resolved_locale}'"
-            )
+            logger.warning(f"Translation key not found: '{key}' in locales '{resolved_locale}'")
             return key
         node = node[part]
 

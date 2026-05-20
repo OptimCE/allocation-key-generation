@@ -7,9 +7,6 @@
       "AUTHORIZATION_MISSING": "Autorisierungs-Header fehlt (Code: 4)"
     },
     "SUBSCRIPTION": {
-      "SUBSCRIPTION": "Abonnementfehler (Code: 1000)",
-      "UNSUBSCRIBED": "Abmeldung nicht möglich (Code: 1001)",
-      "ALREADY_SUBSCRIBED": "Sie sind bereits für diesen Dienst angemeldet (Code: 1002)",
       "NOT_SUBSCRIBED": "Sie sind nicht für diesen Dienst angemeldet (Code: 1003)"
     },
     "GENERATION": {
@@ -27,7 +24,17 @@
         "NOT_FOUND": "Algorithmus nicht gefunden (Code: 2010)"
       },
       "START_GENERATION": "Generierung konnte nicht gestartet werden (Code: 2011)",
-      "INVALID_ALGORITHM_INPUTS": "Ungültige Algorithmus-Eingaben (Code: 2012)"
+      "INVALID_ALGORITHM_INPUTS": "Ungültige Algorithmus-Eingaben (Code: 2012)",
+      "STORAGE_UPLOAD_FAILED": "Hochladen der Quelldatei fehlgeschlagen (Code: 2013)",
+      "INVALID_FILE": "Ungültige oder leere Datei (Code: 2014)"
+    }
+  },
+  "ALGORITHMS": {
+    "BRUTE_FORCE": {
+      "DESCRIPTION": "Erschöpfende Aufzählung von Verteilschlüsseln durch Kombination von Verteilungsalgorithmen"
+    },
+    "OLAGSA": {
+      "DESCRIPTION": "Lineare Optimierung und genetischer Algorithmus mit atypischer Speziation"
     }
   }
 }

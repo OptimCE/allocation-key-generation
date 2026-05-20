@@ -15,7 +15,7 @@ class Error:
         self.key = key
 
 
-class ErrorException(Exception):
+class ErrorException(Exception):  # noqa: N818  # public exception class; renaming would break ~30 call sites
     """
     Exception class for application errors.
 

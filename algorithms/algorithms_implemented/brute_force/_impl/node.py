@@ -16,5 +16,5 @@ class Node:
         self.surplus = surplus
         self.children: list[Node] = []
 
-    def add_child(self, child: "Node") -> None:
+    def add_child(self, child: Node) -> None:
         self.children.append(child)

@@ -4,7 +4,7 @@ from .inputs import OlagsaInput
 
 OLAGSA_METADATA = AlgorithmMetadata(
     name="olagsa",
-    description="Optimal Linear Allocation with Guaranteed Stable Shares",
+    description="ALGORITHMS.OLAGSA.DESCRIPTION",
     version="1.0",
     queue="optimce.allocation.olagsa",
     input_schema=OlagsaInput,

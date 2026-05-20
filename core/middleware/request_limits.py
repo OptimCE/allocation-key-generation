@@ -31,8 +31,28 @@ logger = logging.getLogger(__name__)
 # 2 MB — generous for a JSON API, covers PDF upload metadata but blocks abuse
 MAX_BODY_BYTES = 2 * 1024 * 1024
 
+# Larger cap for explicit upload endpoints (POST /generation/ multipart).
+# 50 MB covers realistic energy datasets (hourly * 365 days * hundreds of
+# consumers) loaded fully into memory in the route handler. Bump this only
+# after moving the upload to a streaming put_object.
+UPLOAD_MAX_BODY_BYTES = 50 * 1024 * 1024
+
+# Path + method pairs that get the larger upload cap. Match on POST only —
+# GET/DELETE on the same path keep the default.
+_UPLOAD_ROUTES: tuple[tuple[str, str], ...] = (("POST", "/generation/"),)
+
 # 30 seconds — covers complex DB queries / PDF generation
 TIMEOUT_SECONDS = 30
+
+
+def _max_body_for(request: Request) -> int:
+    """Return the body-size cap that applies to this request."""
+    path = request.url.path
+    method = request.method.upper()
+    for upload_method, upload_path in _UPLOAD_ROUTES:
+        if method == upload_method and path == upload_path:
+            return UPLOAD_MAX_BODY_BYTES
+    return MAX_BODY_BYTES
 
 
 class RequestLimitsMiddleware(BaseHTTPMiddleware):
@@ -42,15 +62,16 @@ class RequestLimitsMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         # --- Body size gate ---
+        max_bytes = _max_body_for(request)
         content_length = request.headers.get("content-length")
         if content_length is not None:
             try:
-                if int(content_length) > MAX_BODY_BYTES:
+                if int(content_length) > max_bytes:
                     logger.warning(
                         "Request rejected: body too large",
                         extra={
                             "content_length": content_length,
-                            "max_allowed": MAX_BODY_BYTES,
+                            "max_allowed": max_bytes,
                             "path": request.url.path,
                         },
                     )
@@ -70,7 +91,7 @@ class RequestLimitsMiddleware(BaseHTTPMiddleware):
                 call_next(request),
                 timeout=TIMEOUT_SECONDS,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "Request timed out",
                 extra={

@@ -45,9 +45,7 @@ def _load_streams() -> list[dict]:
         {
             "name": s["name"],
             "subjects": s["subjects"],
-            "retention": RETENTION_MAP.get(
-                s.get("retention", "limits"), RetentionPolicy.LIMITS
-            ),
+            "retention": RETENTION_MAP.get(s.get("retention", "limits"), RetentionPolicy.LIMITS),
             "storage": STORAGE_MAP.get(s.get("storage", "file"), StorageType.FILE),
         }
         for s in streams_config

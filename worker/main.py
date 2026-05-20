@@ -13,6 +13,7 @@ Run locally:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import signal
 import sys
@@ -24,7 +25,7 @@ from core.database.database import crm_engine, local_engine
 from core.logging import configure_logging
 from core.queue.init import close_nats, get_jetstream, init_nats
 from core.tracing import setup_tracer_provider
-from worker import dispatcher, http_client
+from worker import dispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +90,7 @@ async def _poll_queue_depth(js, shutdown_event: asyncio.Event) -> None:
     while not shutdown_event.is_set():
         for meta in registry.list_all():
             try:
-                info = await js.consumer_info(
-                    _ALGORITHM_STREAM_NAME, f"worker-{meta.name}"
-                )
+                info = await js.consumer_info(_ALGORITHM_STREAM_NAME, f"worker-{meta.name}")
                 app_metrics.queue_depth_snapshot[meta.name] = int(info.num_pending)
             except Exception as exc:
                 logger.debug("queue depth poll failed for %s: %s", meta.name, exc)
@@ -99,7 +98,7 @@ async def _poll_queue_depth(js, shutdown_event: asyncio.Event) -> None:
             await asyncio.wait_for(
                 shutdown_event.wait(), timeout=_QUEUE_DEPTH_POLL_INTERVAL_SECONDS
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             continue
 
 
@@ -119,8 +118,6 @@ async def main() -> None:
     await _connect_nats_with_retry()
     js = get_jetstream()
 
-    http = http_client.make_http_client()
-
     shutdown_event = asyncio.Event()
     _install_signal_handlers(shutdown_event)
 
@@ -128,16 +125,14 @@ async def main() -> None:
     queue_depth_task: asyncio.Task | None = None
     try:
         for meta in registry.list_all():
-            sub = await dispatcher.subscribe_algorithm(js, meta, http)
+            sub = await dispatcher.subscribe_algorithm(js, meta)
             subscriptions.append(sub)
 
         queue_depth_task = asyncio.create_task(
             _poll_queue_depth(js, shutdown_event), name="queue-depth-poller"
         )
 
-        logger.info(
-            "Worker ready — listening on %d algorithm queue(s)", len(subscriptions)
-        )
+        logger.info("Worker ready — listening on %d algorithm queue(s)", len(subscriptions))
         await shutdown_event.wait()
         logger.info("Shutdown signal received; draining subscriptions...")
     finally:
@@ -145,10 +140,8 @@ async def main() -> None:
         # doesn't race against a closing JetStream connection.
         if queue_depth_task is not None:
             queue_depth_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await queue_depth_task
-            except (asyncio.CancelledError, Exception):
-                pass
 
         # Drain in best-effort order. Each step is wrapped because we want
         # later steps to run even if an earlier one fails (e.g. NATS
@@ -158,11 +151,6 @@ async def main() -> None:
                 await sub.drain()
             except Exception:
                 logger.exception("Error draining subscription")
-
-        try:
-            await http.aclose()
-        except Exception:
-            logger.exception("Error closing HTTP client")
 
         try:
             await close_nats()

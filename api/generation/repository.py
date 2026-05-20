@@ -1,11 +1,14 @@
+from typing import cast
+
+from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
+
 from shared.database.with_community import with_community_scope
 from shared.models.local_models import (
-    GenerationModel,
     AllocationKeyGeneratedModel,
+    GenerationModel,
     IterationGeneratedModel,
 )
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
 
 
 class GenerationRepository:
@@ -56,9 +59,7 @@ class GenerationRepository:
                 stmt = stmt.order_by(GenerationModel.id.asc())
         else:
             stmt = stmt.order_by(GenerationModel.id.asc())
-        total_result = await self.session.execute(
-            select(func.count()).select_from(stmt.subquery())
-        )
+        total_result = await self.session.execute(select(func.count()).select_from(stmt.subquery()))
         total = total_result.scalar_one()
 
         rows_result = await self.session.execute(
@@ -74,9 +75,7 @@ class GenerationRepository:
         surplus_subq = (
             select(
                 IterationGeneratedModel.id_allocation_key,
-                func.coalesce(func.sum(IterationGeneratedModel.surplus_total), 0).label(
-                    "surplus"
-                ),
+                func.coalesce(func.sum(IterationGeneratedModel.surplus_total), 0).label("surplus"),
             )
             .group_by(IterationGeneratedModel.id_allocation_key)
             .subquery()
@@ -113,9 +112,7 @@ class GenerationRepository:
                 stmt = stmt.order_by(AllocationKeyGeneratedModel.id.asc())
         else:
             stmt = stmt.order_by(AllocationKeyGeneratedModel.id.asc())
-        total_result = await self.session.execute(
-            select(func.count()).select_from(stmt.subquery())
-        )
+        total_result = await self.session.execute(select(func.count()).select_from(stmt.subquery()))
         total = total_result.scalar_one()
 
         rows_result = await self.session.execute(
@@ -125,9 +122,7 @@ class GenerationRepository:
 
         return rows, total
 
-    async def get_allocation_key(
-        self, id_key: int
-    ) -> AllocationKeyGeneratedModel | None:
+    async def get_allocation_key(self, id_key: int) -> AllocationKeyGeneratedModel | None:
         stmt = (
             select(AllocationKeyGeneratedModel)
             .options(
@@ -139,13 +134,13 @@ class GenerationRepository:
         )
         stmt = with_community_scope(stmt, AllocationKeyGeneratedModel)
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        return cast(AllocationKeyGeneratedModel | None, result.scalar_one_or_none())
 
     async def get_generation(self, id_generation: int) -> GenerationModel | None:
         stmt = select(GenerationModel).where(GenerationModel.id == id_generation)
         stmt = with_community_scope(stmt, GenerationModel)
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        return cast(GenerationModel | None, result.scalar_one_or_none())
 
     async def delete_generation(self, generation: GenerationModel) -> None:
         await self.session.delete(generation)

@@ -17,7 +17,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # init_nats — reconnect kwargs
 # ---------------------------------------------------------------------------

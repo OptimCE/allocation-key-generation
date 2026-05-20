@@ -1,24 +1,27 @@
 import logging
+from uuid import uuid4
 
+from fastapi import UploadFile
 from pydantic import ValidationError
 
 from algorithms.registry import registry
 from api.generation.mappers import (
-    to_generation_schema,
-    to_allocation_key_generated_schema,
-    to_partial_allocation_key_generated_schema,
     to_allocation_key_crm,
+    to_allocation_key_generated_schema,
+    to_generation_schema,
+    to_partial_allocation_key_generated_schema,
 )
 from api.generation.repository import GenerationRepository
 from api.generation.schemas import (
     AllocationKeyGenerated,
-    Generation,
     GenerateRequest,
     GenerateResponse,
+    Generation,
     PartialAllocationKeyGenerated,
     SaveKey,
 )
 from core import metrics as app_metrics
+from core import storage
 from core.api_response import Pagination
 from core.database.database import AsyncSessionLocalFactory
 from core.errors.errors import ErrorException
@@ -42,9 +45,7 @@ class GenerationService:
     async def get_generations(
         self, page: int, page_size: int, query_param: dict
     ) -> tuple[list[Generation], Pagination]:
-        rows, total = await self.repository.get_list_generations(
-            page, page_size, query_param
-        )
+        rows, total = await self.repository.get_list_generations(page, page_size, query_param)
         data = [to_generation_schema(n) for n in rows]
         pagination = Pagination(
             page=page, limit=page_size, total=total, total_pages=-(-total // page_size)
@@ -66,20 +67,21 @@ class GenerationService:
     async def get_allocation_key(self, id_key: int) -> AllocationKeyGenerated:
         data = await self.repository.get_allocation_key(id_key)
         if not data:
-            raise ErrorException(
-                error=errors.generation.ALLOCATION_KEY_NOT_FOUND, status_code=400
-            )
+            raise ErrorException(error=errors.generation.ALLOCATION_KEY_NOT_FOUND, status_code=400)
         return to_allocation_key_generated_schema(data)
 
     async def start_generation(
-        self, req: GenerateRequest, community_id: int
+        self, req: GenerateRequest, file: UploadFile, community_id: int
     ) -> GenerateResponse:
-        """Create a new generation row, commit it, then publish a NATS event.
+        """Upload the source file to MinIO, persist the row, publish a NATS event.
 
-        Ordering: commit-then-publish. If the publish fails after the commit,
-        we open a fresh session and mark the row FAILED with an error message,
-        then re-raise. This makes the failure visible to the user instead of
-        leaving an orphaned PENDING row.
+        Ordering: upload-then-commit-then-publish. Uploading first means a
+        DB failure leaves only a transient orphan in MinIO (cleaned up in
+        the rollback branch). The alternative — commit first — would leave
+        a row pointing at a non-existent key.
+
+        On any failure after a successful upload, the object is deleted
+        best-effort so the bucket does not accumulate orphans.
         """
         # 1. Algorithm lookup — must be in the registry.
         if req.algorithm_name not in registry:
@@ -99,25 +101,57 @@ class GenerationService:
                 status_code=422,
             ) from e
 
-        # 3. Build and persist the generation row.
+        # 3. Read the upload body. Reject empty files so the worker doesn't
+        # waste a slot on a guaranteed parse failure.
+        content = await file.read()
+        if not content:
+            raise ErrorException(
+                error=errors.generation.INVALID_FILE,
+                status_code=422,
+            )
+        file_name = file.filename or "uploaded-file"
+
+        # 4. Upload to MinIO. The community_id keeps keys browsable per
+        # tenant; the UUID guarantees no collisions when two requests use
+        # the same filename.
+        storage_key = f"allocations/{community_id}/{uuid4()}/{file_name}"
+        try:
+            await storage.upload(storage_key, content, content_type=file.content_type)
+        except Exception as exc:
+            logger.exception(
+                "Storage upload failed for community %d key=%s",
+                community_id,
+                storage_key,
+            )
+            raise ErrorException(
+                error=errors.generation.STORAGE_UPLOAD_FAILED,
+                status_code=502,
+            ) from exc
+
+        # 5. Build and persist the generation row. If the DB write fails,
+        # the uploaded object becomes orphaned — clean it up.
         model = GenerationModel(
             name=req.name,
             id_community=community_id,
-            file_url=req.file_url,
-            file_name=req.file_name,
+            file_storage_key=storage_key,
+            file_name=file_name,
             injection_name=req.injection_name,
             algorithm_name=meta.name,
             algorithm_version=meta.version,
             inputs=validated_inputs.model_dump(mode="json"),
             status=GenerationStatus.PENDING,
         )
-        await self.repository.create_generation(model)
-        await self.local_session.commit()
+        try:
+            await self.repository.create_generation(model)
+            await self.local_session.commit()
+        except Exception:
+            await _best_effort_delete(storage_key)
+            raise
         generation_id = model.id
         app_metrics.generations_created.add(1, {"algorithm": meta.name})
 
-        # 4. Publish event to the algorithm's queue. On failure, mark the
-        # row FAILED in a separate transaction so the user sees what happened.
+        # 6. Publish event to the algorithm's queue. On failure, mark the
+        # row FAILED in a separate transaction and delete the orphan object.
         event = Event(
             type="generation.requested",
             data={"generation_id": generation_id},
@@ -125,10 +159,9 @@ class GenerationService:
         try:
             await send_event(get_jetstream(), meta.queue, event)
         except Exception as exc:
-            logger.exception(
-                "Failed to publish generation %d to %s", generation_id, meta.queue
-            )
+            logger.exception("Failed to publish generation %d to %s", generation_id, meta.queue)
             await self._mark_failed_to_queue(generation_id, str(exc))
+            await _best_effort_delete(storage_key)
             raise ErrorException(
                 error=errors.generation.START_GENERATION,
                 status_code=500,
@@ -159,9 +192,7 @@ class GenerationService:
         # Retrieve it in this database
         key = await self.repository.get_allocation_key(saved_key.id_key)
         if not key:
-            raise ErrorException(
-                error=errors.generation.ALLOCATION_KEY_NOT_FOUND, status_code=400
-            )
+            raise ErrorException(error=errors.generation.ALLOCATION_KEY_NOT_FOUND, status_code=400)
         # Refactor it
         allocation_key = to_allocation_key_crm(key)
         # Save it in crm database
@@ -171,17 +202,23 @@ class GenerationService:
     async def delete_generation(self, id_generation):
         generation = await self.repository.get_generation(id_generation)
         if not generation:
-            raise ErrorException(
-                error=errors.generation.GENERATION_NOT_FOUND, status_code=400
-            )
+            raise ErrorException(error=errors.generation.GENERATION_NOT_FOUND, status_code=400)
         await self.repository.delete_generation(generation)
         await self.local_session.commit()
 
     async def delete_key(self, id_key):
         key = await self.repository.get_allocation_key(id_key)
         if not key:
-            raise ErrorException(
-                error=errors.generation.ALLOCATION_KEY_NOT_FOUND, status_code=400
-            )
+            raise ErrorException(error=errors.generation.ALLOCATION_KEY_NOT_FOUND, status_code=400)
         await self.repository.delete_key(key)
         await self.local_session.commit()
+
+
+async def _best_effort_delete(storage_key: str) -> None:
+    """Wrap ``storage.delete`` for rollback paths so the caller is unaware.
+
+    ``storage.delete`` already swallows its own errors and is idempotent;
+    this exists so future instrumentation (e.g. counting rollback orphans)
+    has a single place to hook in.
+    """
+    await storage.delete(storage_key)

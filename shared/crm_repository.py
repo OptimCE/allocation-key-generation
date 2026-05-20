@@ -7,9 +7,7 @@ class CRMRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def save_allocation_key(
-        self, allocation_key: AllocationKeyModel
-    ) -> AllocationKeyModel:
+    async def save_allocation_key(self, allocation_key: AllocationKeyModel) -> AllocationKeyModel:
         self.session.add(allocation_key)
         await self.session.flush()
         return allocation_key

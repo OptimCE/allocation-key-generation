@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import numpy as np
 
+from .consumer import Consumer
 from .functions import ALGO_NAMES, ALGOS
 from .iteration import Iteration
-from .consumer import Consumer
 from .node import Node
 
 
-def _reformat_excedents(VA_shape: tuple[int, int], surplus: np.ndarray) -> np.ndarray:
+def _reformat_excedents(VA_shape: tuple[int, ...], surplus: np.ndarray) -> np.ndarray:
     """Broadcast a per-time-step surplus vector back into a (num_consumers, T) matrix.
 
     Mirrors the legacy ``BruteForceGenerator.reformat_excedents`` helper:
@@ -30,9 +30,7 @@ def _reformat_excedents(VA_shape: tuple[int, int], surplus: np.ndarray) -> np.nd
 
 
 def _make_root_iteration(C: np.ndarray, VA: np.ndarray) -> Iteration:
-    consumers = [
-        Consumer(consumption=np.array(C[i], dtype=float)) for i in range(len(C))
-    ]
+    consumers = [Consumer(consumption=np.array(C[i], dtype=float)) for i in range(len(C))]
     return Iteration(consumers, VA)
 
 
@@ -92,7 +90,7 @@ class BruteForceGenerator:
     def _three_iterations(self, root: Iteration, VA: np.ndarray) -> list[Node]:
         results: list[Node] = []
         for i in range(11):
-            for j in range(0, (10 - i) + 1):
+            for j in range((10 - i) + 1):
                 pct1 = i / 10
                 pct2 = j / 10
                 pct3_raw = 1 - pct1 - pct2
@@ -106,9 +104,7 @@ class BruteForceGenerator:
                         iter2_in = base_iter2.copy()
                         node2, iter2_post = ALGOS[algo2](iter2_in)
 
-                        base_iter3 = self._build_next_iteration(
-                            root, iter2_post, VA, pct3
-                        )
+                        base_iter3 = self._build_next_iteration(root, iter2_post, VA, pct3)
                         for algo3 in ALGO_NAMES:
                             iter3_in = base_iter3.copy()
                             node3, _ = ALGOS[algo3](iter3_in)
@@ -147,9 +143,9 @@ class BruteForceGenerator:
         """
         next_iter = previous_post.copy()
         next_iter.energy_allocated_percentage = pct
-        next_iter.energy_allocated = (
-            root.energy_allocated * pct
-        ) + _reformat_excedents(VA.shape, previous_post.surplus)
+        next_iter.energy_allocated = (root.energy_allocated * pct) + _reformat_excedents(
+            VA.shape, previous_post.surplus
+        )
         for c in next_iter.consumers:
             c.consumption = np.array(c.residual_volume, copy=True)
         return next_iter

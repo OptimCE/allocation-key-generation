@@ -25,9 +25,7 @@ class IterationGenerated(BaseModel):
     energy_allocated_percentage: float = Field(
         ..., description="Energy allocated percentage of the iteration."
     )
-    consumers: list[ConsumerGenerated] = Field(
-        ..., description="Consumers of the iteration."
-    )
+    consumers: list[ConsumerGenerated] = Field(..., description="Consumers of the iteration.")
     surplus_total: float = Field(..., description="Total surplus of the iteration.")
 
 
@@ -39,9 +37,7 @@ class PartialAllocationKeyGenerated(BaseModel):
 
 
 class AllocationKeyGenerated(PartialAllocationKeyGenerated):
-    iterations: list[IterationGenerated] = Field(
-        ..., description="Iterations of the generation."
-    )
+    iterations: list[IterationGenerated] = Field(..., description="Iterations of the generation.")
 
 
 class SaveKey(BaseModel):
@@ -49,35 +45,37 @@ class SaveKey(BaseModel):
 
 
 class GenerateRequest(BaseModel):
-    """Body of POST /generation/.
+    """Internal carrier for the parsed-and-validated start-generation request.
 
-    Triggers a new generation. The ``inputs`` field is validated dynamically
-    against the algorithm's own input schema (``registry.metadata(algorithm_name).input_schema``)
+    POST /generation/ is multipart/form-data (the file is uploaded alongside
+    the metadata), so this is **not** the FastAPI body model — the route
+    binds each form field individually, parses the ``inputs`` JSON string,
+    and assembles this object for the service layer.
+
+    The ``inputs`` field is validated dynamically against the algorithm's
+    own input schema (``registry.metadata(algorithm_name).input_schema``)
     in the service layer — we cannot statically express it as a discriminated
     union because algorithms are pluggable.
 
     ``id_community`` and ``algorithm_version`` are intentionally absent:
     - community comes from the auth context (``require_community``);
     - version is snapshotted from the metadata at creation time.
+
+    ``file_name`` is derived from ``UploadFile.filename`` in the service,
+    not carried in the request.
     """
 
     name: str = Field(..., description="User-facing label for the generation.")
-    file_url: str = Field(
-        ..., description="URL of the externally hosted source data file."
-    )
-    file_name: str = Field(
-        ..., description="Original file name (used to pick CSV vs XLSX parser)."
-    )
     injection_name: str = Field(
         ...,
         description="Name of the injection (production) column inside the source file.",
     )
-    algorithm_name: str = Field(
-        ..., description="Algorithm registry key, e.g. 'olagsa'."
-    )
+    algorithm_name: str = Field(..., description="Algorithm registry key, e.g. 'olagsa'.")
     inputs: dict[str, Any] = Field(
         ...,
-        description="Algorithm-specific input parameters; validated against the algorithm's input schema.",
+        description=(
+            "Algorithm-specific input parameters; validated against the algorithm's input schema."
+        ),
     )
 
 
@@ -85,6 +83,4 @@ class GenerateResponse(BaseModel):
     """Returned by POST /generation/ once the generation row is created and queued."""
 
     id: int = Field(..., description="ID of the freshly created generation row.")
-    status: GenerationStatus = Field(
-        ..., description="Initial status (always PENDING on success)."
-    )
+    status: GenerationStatus = Field(..., description="Initial status (always PENDING on success).")

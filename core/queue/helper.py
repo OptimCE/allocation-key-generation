@@ -45,7 +45,7 @@ async def send_event(
     subject: str,
     event: Event,
     *,
-    timeout: float = _PUBLISH_TIMEOUT_SECONDS,
+    timeout: float = _PUBLISH_TIMEOUT_SECONDS,  # noqa: ASYNC109  # forwarded to js.publish(timeout=...)
 ) -> None:
     ack = await js.publish(
         subject,

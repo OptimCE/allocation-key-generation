@@ -24,10 +24,7 @@ class Segment:
         squared_length = (self.point_b.x - self.point_a.x) ** 2 + (
             self.point_b.y - self.point_a.y
         ) ** 2
-        if dotproduct > squared_length:
-            return False
-
-        return True
+        return dotproduct <= squared_length
 
 
 def _distance_3d(a: Coordinate3D, b: Coordinate3D) -> float:
@@ -35,10 +32,13 @@ def _distance_3d(a: Coordinate3D, b: Coordinate3D) -> float:
 
 
 class Triangle(Segment):
-    def __init__(
-        self, point_a: Coordinate3D, point_b: Coordinate3D, point_c: Coordinate3D
-    ) -> None:
+    def __init__(self, point_a: Coordinate3D, point_b: Coordinate3D, point_c: Coordinate3D) -> None:
         super().__init__(point_a, point_b)
+        # Re-bind point_a/point_b with the narrower Coordinate3D type so
+        # _distance_3d and Coordinate3D.z accesses type-check. Segment
+        # stores them as Coordinate.
+        self.point_a: Coordinate3D = point_a
+        self.point_b: Coordinate3D = point_b
         self.point_c = point_c
         self.side_length = _distance_3d(point_a, point_b)
 

@@ -1,5 +1,3 @@
-from typing import Optional
-
 from .individual import Individual
 from .key import Key
 
@@ -9,7 +7,7 @@ class BestSolution:
         self,
         individual: Individual,
         fitness: float,
-        key: Optional[Key] = None,
+        key: Key | None = None,
     ) -> None:
         self.individual = individual
         self.fitness = fitness

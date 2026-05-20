@@ -60,9 +60,7 @@ async def save_success(generation_id: int, result: AlgorithmResult) -> None:
     async with AsyncSessionLocalFactory() as session:
         generation = await session.get(GenerationModel, generation_id)
         if generation is None:
-            logger.warning(
-                "save_success called for missing generation id=%d", generation_id
-            )
+            logger.warning("save_success called for missing generation id=%d", generation_id)
             return
 
         # Atomic claim: row-level lock + status check happen together. If
@@ -133,9 +131,7 @@ async def save_failure(generation_id: int, error_message: str) -> None:
     async with AsyncSessionLocalFactory() as session:
         generation = await session.get(GenerationModel, generation_id)
         if generation is None:
-            logger.warning(
-                "save_failure called for missing generation id=%d", generation_id
-            )
+            logger.warning("save_failure called for missing generation id=%d", generation_id)
             return
 
         result_proxy = await session.execute(

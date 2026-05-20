@@ -25,7 +25,7 @@ from .inputs import BruteForceInput
 from .metadata import BRUTE_FORCE_METADATA
 
 
-class BruteForceAlgorithm(Algorithm):
+class BruteForceAlgorithm(Algorithm[BruteForceInput]):
     metadata = BRUTE_FORCE_METADATA
 
     async def run(
@@ -50,9 +50,7 @@ class BruteForceAlgorithm(Algorithm):
 _DESCRIPTION = "Clé obtenue grâce à l'algorithme de brute force"
 
 
-def _consumer_results(
-    iteration: Iteration, consumer_names: list[str]
-) -> list[ConsumerResult]:
+def _consumer_results(iteration: Iteration, consumer_names: list[str]) -> list[ConsumerResult]:
     """Convert an Iteration's consumers into the pure ConsumerResult schema.
 
     For ``prorata`` (time-varying) consumers the percentage is recorded as
@@ -72,9 +70,7 @@ def _consumer_results(
             pct = 0.0
 
         name = (
-            consumer_names[j]
-            if j < len(consumer_names) and consumer_names[j]
-            else f"Consumer {j}"
+            consumer_names[j] if j < len(consumer_names) and consumer_names[j] else f"Consumer {j}"
         )
         results.append(ConsumerResult(name=name, energy_allocated_percentage=pct))
     return results
@@ -95,14 +91,10 @@ def _flatten_node(root: Node, consumer_names: list[str]) -> list[AllocationKeyRe
     """Walk the result tree and emit one AllocationKeyResult per leaf path."""
     keys: list[AllocationKeyResult] = []
 
-    def walk(
-        node: Node, path_iters: list[IterationResult], path_names: list[str]
-    ) -> None:
-        iter_res = _iteration_result(
-            node.iteration, len(path_iters) + 1, consumer_names
-        )
-        new_iters = path_iters + [iter_res]
-        new_names = path_names + [node.name]
+    def walk(node: Node, path_iters: list[IterationResult], path_names: list[str]) -> None:
+        iter_res = _iteration_result(node.iteration, len(path_iters) + 1, consumer_names)
+        new_iters = [*path_iters, iter_res]
+        new_names = [*path_names, node.name]
 
         if not node.children:
             keys.append(_build_key(new_iters, new_names))
@@ -114,12 +106,8 @@ def _flatten_node(root: Node, consumer_names: list[str]) -> list[AllocationKeyRe
     return keys
 
 
-def _build_key(
-    iterations: list[IterationResult], algo_names: list[str]
-) -> AllocationKeyResult:
-    pct_strs = ",".join(
-        f"{round(it.energy_allocated_percentage, 2)}" for it in iterations
-    )
+def _build_key(iterations: list[IterationResult], algo_names: list[str]) -> AllocationKeyResult:
+    pct_strs = ",".join(f"{round(it.energy_allocated_percentage, 2)}" for it in iterations)
     final_surplus = round(iterations[-1].surplus_total, 2) if iterations else 0.0
     joined = " - ".join(algo_names)
 

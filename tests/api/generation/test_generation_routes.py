@@ -13,6 +13,7 @@ Every test must also create an active `algorithm` subscription, otherwise
 the router-level `require_feature(FeatureName.ALGORITHM)` returns 403.
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import select
@@ -39,7 +40,6 @@ from tests.factories.subscription_factory import (
     create_subscription,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -50,6 +50,33 @@ def _admin_headers(community: Community) -> dict[str, str]:
         "x-user-id": "test|admin",
         "x-community-id": community.auth_community_id,
         "x-user-role": "ADMIN",
+    }
+
+
+# Helpers for the multipart POST /generation/ shape. The route accepts the
+# file as ``files["file"]`` and the metadata (including ``inputs`` as a JSON
+# string) as ``data``. Tests mock ``api.generation.service.storage.upload``
+# so no real MinIO is contacted.
+_DEFAULT_FILE = ("data.csv", b"col1,col2,production\n1,2,3\n", "text/csv")
+
+
+def _multipart_payload(
+    *,
+    name: str = "my generation",
+    injection_name: str = "production",
+    algorithm_name: str = "brute_force",
+    inputs: dict | None = None,
+    file: tuple[str, bytes, str] | None = None,
+) -> dict:
+    """Build the kwargs for ``client.post`` to hit the multipart endpoint."""
+    return {
+        "files": {"file": file or _DEFAULT_FILE},
+        "data": {
+            "name": name,
+            "injection_name": injection_name,
+            "algorithm_name": algorithm_name,
+            "inputs": json.dumps(inputs if inputs is not None else {"iterations": 2}),
+        },
     }
 
 
@@ -73,9 +100,7 @@ async def _community_with_subscription(db_session) -> Community:
 async def test_get_algorithms_returns_brute_force_and_olagsa(client, db_session):
     community = await _community_with_subscription(db_session)
 
-    response = await client.get(
-        "/generation/algorithms", headers=_admin_headers(community)
-    )
+    response = await client.get("/algorithms", headers=_admin_headers(community))
 
     assert response.status_code == 200
     body = response.json()
@@ -90,14 +115,10 @@ async def test_get_algorithms_returns_brute_force_and_olagsa(client, db_session)
 # ---------------------------------------------------------------------------
 
 
-async def test_get_algorithm_inputs_brute_force_returns_input_schema(
-    client, db_session
-):
+async def test_get_algorithm_inputs_brute_force_returns_input_schema(client, db_session):
     community = await _community_with_subscription(db_session)
 
-    response = await client.get(
-        "/generation/algorithms/brute_force", headers=_admin_headers(community)
-    )
+    response = await client.get("/algorithms/brute_force", headers=_admin_headers(community))
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -110,9 +131,7 @@ async def test_get_algorithm_inputs_brute_force_returns_input_schema(
 async def test_get_algorithm_inputs_olagsa_returns_input_schema(client, db_session):
     community = await _community_with_subscription(db_session)
 
-    response = await client.get(
-        "/generation/algorithms/olagsa", headers=_admin_headers(community)
-    )
+    response = await client.get("/algorithms/olagsa", headers=_admin_headers(community))
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -126,7 +145,7 @@ async def test_get_algorithm_inputs_unknown_returns_404_with_2010(client, db_ses
     community = await _community_with_subscription(db_session)
 
     response = await client.get(
-        "/generation/algorithms/does_not_exist",
+        "/algorithms/does_not_exist",
         headers=_admin_headers(community),
     )
 
@@ -142,7 +161,7 @@ async def test_get_algorithm_inputs_unknown_returns_404_with_2010(client, db_ses
 async def test_get_generations_empty_returns_pagination_zero(client, db_session):
     community = await _community_with_subscription(db_session)
 
-    response = await client.get("/generation/", headers=_admin_headers(community))
+    response = await client.get("/", headers=_admin_headers(community))
 
     assert response.status_code == 200
     body = response.json()
@@ -157,7 +176,7 @@ async def test_get_generations_returns_only_current_community(client, db_session
     await create_generation(db_session, id_community=community_a.id, name="A row")
     await create_generation(db_session, id_community=community_b.id, name="B row")
 
-    response = await client.get("/generation/", headers=_admin_headers(community_a))
+    response = await client.get("/", headers=_admin_headers(community_a))
 
     assert response.status_code == 200
     body = response.json()
@@ -168,12 +187,8 @@ async def test_get_generations_returns_only_current_community(client, db_session
 
 async def test_get_generations_filter_by_status(client, db_session):
     community = await _community_with_subscription(db_session)
-    await create_generation(
-        db_session, id_community=community.id, status=GenerationStatus.PENDING
-    )
-    await create_generation(
-        db_session, id_community=community.id, status=GenerationStatus.PENDING
-    )
+    await create_generation(db_session, id_community=community.id, status=GenerationStatus.PENDING)
+    await create_generation(db_session, id_community=community.id, status=GenerationStatus.PENDING)
     success = await create_generation(
         db_session,
         id_community=community.id,
@@ -181,9 +196,7 @@ async def test_get_generations_filter_by_status(client, db_session):
         name="successful",
     )
 
-    response = await client.get(
-        "/generation/?status=1", headers=_admin_headers(community)
-    )
+    response = await client.get("/?status=1", headers=_admin_headers(community))
 
     assert response.status_code == 200
     body = response.json()
@@ -197,9 +210,7 @@ async def test_get_generations_pagination(client, db_session):
     for _ in range(3):
         await create_generation(db_session, id_community=community.id)
 
-    response = await client.get(
-        "/generation/?page=1&page_size=2", headers=_admin_headers(community)
-    )
+    response = await client.get("/?page=1&page_size=2", headers=_admin_headers(community))
 
     assert response.status_code == 200
     body = response.json()
@@ -209,28 +220,29 @@ async def test_get_generations_pagination(client, db_session):
 
 
 # ---------------------------------------------------------------------------
-# POST /generation/  (start) — NATS mocked
+# POST /generation/  (start) — NATS + storage mocked
+#
+# The route is multipart/form-data: the file is uploaded alongside the
+# metadata, the service uploads it to MinIO and stores the object key on
+# the row, and the worker is responsible for deleting it. All POST tests
+# mock ``storage.upload`` so no real MinIO is needed; the assertion
+# pattern is "uploader was awaited with a key matching the persisted row".
 # ---------------------------------------------------------------------------
 
 
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
 @patch("api.generation.service.get_jetstream", return_value=MagicMock())
 @patch("api.generation.service.send_event", new_callable=AsyncMock)
 async def test_start_generation_brute_force_publishes_event_and_returns_pending(
-    mock_send, mock_jetstream, client, db_session
+    mock_send, mock_jetstream, mock_upload, mock_delete, client, db_session
 ):
     community = await _community_with_subscription(db_session)
 
     response = await client.post(
-        "/generation/",
+        "/",
         headers=_admin_headers(community),
-        json={
-            "name": "my generation",
-            "file_url": "https://example.com/data.csv",
-            "file_name": "data.csv",
-            "injection_name": "production",
-            "algorithm_name": "brute_force",
-            "inputs": {"iterations": 2},
-        },
+        **_multipart_payload(name="my generation", inputs={"iterations": 2}),
     )
 
     assert response.status_code == 200
@@ -238,6 +250,14 @@ async def test_start_generation_brute_force_publishes_event_and_returns_pending(
     assert body["error_code"] == 0
     assert body["data"]["status"] == int(GenerationStatus.PENDING)
     new_id = body["data"]["id"]
+
+    # The file was uploaded to MinIO exactly once before publishing.
+    mock_upload.assert_awaited_once()
+    uploaded_key = mock_upload.await_args.args[0]
+    uploaded_content = mock_upload.await_args.args[1]
+    assert uploaded_key.startswith(f"allocations/{community.id}/")
+    assert uploaded_key.endswith("/data.csv")
+    assert uploaded_content == _DEFAULT_FILE[1]
 
     # The NATS publish was performed once on the algorithm's queue.
     mock_send.assert_awaited_once()
@@ -247,127 +267,139 @@ async def test_start_generation_brute_force_publishes_event_and_returns_pending(
     assert event.type == "generation.requested"
     assert event.data == {"generation_id": new_id}
 
-    # The row was persisted with the resolved internal community id.
+    # The row was persisted with the uploaded key.
     row = (
-        await db_session.execute(
-            select(GenerationModel).where(GenerationModel.id == new_id)
-        )
+        await db_session.execute(select(GenerationModel).where(GenerationModel.id == new_id))
     ).scalar_one()
     assert row.status == GenerationStatus.PENDING
     assert row.algorithm_name == "brute_force"
     assert row.algorithm_version == "1.0"
     assert row.inputs == {"iterations": 2}
     assert row.id_community == community.id
+    assert row.file_storage_key == uploaded_key
+    assert row.file_name == "data.csv"
+
+    # Happy path: no rollback, so service.storage.delete is never called.
+    mock_delete.assert_not_awaited()
 
 
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
 @patch("api.generation.service.get_jetstream", return_value=MagicMock())
 @patch("api.generation.service.send_event", new_callable=AsyncMock)
 async def test_start_generation_then_list_returns_the_new_row(
-    mock_send, mock_jetstream, client, db_session
+    mock_send, mock_jetstream, mock_upload, mock_delete, client, db_session
 ):
     community = await _community_with_subscription(db_session)
 
     create = await client.post(
-        "/generation/",
+        "/",
         headers=_admin_headers(community),
-        json={
-            "name": "round trip",
-            "file_url": "https://example.com/data.csv",
-            "file_name": "data.csv",
-            "injection_name": "production",
-            "algorithm_name": "brute_force",
-            "inputs": {"iterations": 1},
-        },
+        **_multipart_payload(name="round trip", inputs={"iterations": 1}),
     )
     assert create.status_code == 200
     new_id = create.json()["data"]["id"]
 
-    listing = await client.get("/generation/", headers=_admin_headers(community))
+    listing = await client.get("/", headers=_admin_headers(community))
 
     assert listing.status_code == 200
     ids = [row["id"] for row in listing.json()["data"]]
     assert new_id in ids
 
 
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
 @patch("api.generation.service.get_jetstream", return_value=MagicMock())
 @patch("api.generation.service.send_event", new_callable=AsyncMock)
 async def test_start_generation_olagsa_publishes_to_olagsa_queue(
-    mock_send, mock_jetstream, client, db_session
+    mock_send, mock_jetstream, mock_upload, mock_delete, client, db_session
 ):
     community = await _community_with_subscription(db_session)
 
     response = await client.post(
-        "/generation/",
+        "/",
         headers=_admin_headers(community),
-        json={
-            "name": "olagsa run",
-            "file_url": "https://example.com/data.csv",
-            "file_name": "data.csv",
-            "injection_name": "production",
-            "algorithm_name": "olagsa",
-            "inputs": {"iterations": 1},
-        },
+        **_multipart_payload(name="olagsa run", algorithm_name="olagsa", inputs={"iterations": 1}),
     )
 
     assert response.status_code == 200
+    mock_upload.assert_awaited_once()
     mock_send.assert_awaited_once()
     assert mock_send.call_args[0][1] == "optimce.allocation.olagsa"
 
 
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
 @patch("api.generation.service.get_jetstream", return_value=MagicMock())
 @patch("api.generation.service.send_event", new_callable=AsyncMock)
 async def test_start_generation_unknown_algorithm_returns_404_with_2010(
-    mock_send, mock_jetstream, client, db_session
+    mock_send, mock_jetstream, mock_upload, mock_delete, client, db_session
 ):
     community = await _community_with_subscription(db_session)
 
     response = await client.post(
-        "/generation/",
+        "/",
         headers=_admin_headers(community),
-        json={
-            "name": "x",
-            "file_url": "https://example.com/data.csv",
-            "file_name": "data.csv",
-            "injection_name": "production",
-            "algorithm_name": "missing",
-            "inputs": {},
-        },
+        **_multipart_payload(algorithm_name="missing", inputs={}),
     )
 
     assert response.status_code == 404
     assert response.json()["error_code"] == 2010
     mock_send.assert_not_awaited()
+    # Validation happens before upload, so MinIO is never touched.
+    mock_upload.assert_not_awaited()
 
 
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
 @patch("api.generation.service.get_jetstream", return_value=MagicMock())
 @patch("api.generation.service.send_event", new_callable=AsyncMock)
 async def test_start_generation_invalid_inputs_returns_422_with_2012(
-    mock_send, mock_jetstream, client, db_session
+    mock_send, mock_jetstream, mock_upload, mock_delete, client, db_session
 ):
     community = await _community_with_subscription(db_session)
 
     response = await client.post(
-        "/generation/",
+        "/",
         headers=_admin_headers(community),
-        json={
-            "name": "x",
-            "file_url": "https://example.com/data.csv",
-            "file_name": "data.csv",
-            "injection_name": "production",
-            "algorithm_name": "brute_force",
-            "inputs": {"iterations": 99},  # ge=1, le=3
-        },
+        **_multipart_payload(inputs={"iterations": 99}),  # ge=1, le=3
     )
 
     assert response.status_code == 422
     assert response.json()["error_code"] == 2012
     mock_send.assert_not_awaited()
+    mock_upload.assert_not_awaited()
+
+
+async def test_start_generation_malformed_inputs_json_returns_422(client, db_session):
+    """A non-JSON or non-object ``inputs`` form field is a 422 with the
+    INVALID_ALGORITHM_INPUTS code, surfaced by the route before any
+    service work happens.
+    """
+    community = await _community_with_subscription(db_session)
+
+    response = await client.post(
+        "/",
+        headers=_admin_headers(community),
+        files={"file": _DEFAULT_FILE},
+        data={
+            "name": "bad inputs",
+            "injection_name": "production",
+            "algorithm_name": "brute_force",
+            "inputs": "this is not json",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == 2012
 
 
 @patch(
     "api.generation.service.GenerationService._mark_failed_to_queue",
     new_callable=AsyncMock,
 )
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
 @patch("api.generation.service.get_jetstream", return_value=MagicMock())
 @patch(
     "api.generation.service.send_event",
@@ -375,30 +407,29 @@ async def test_start_generation_invalid_inputs_returns_422_with_2012(
     side_effect=RuntimeError("nats down"),
 )
 async def test_start_generation_publish_failure_returns_500_and_marks_failed(
-    mock_send, mock_jetstream, mock_mark_failed, client, db_session
+    mock_send,
+    mock_jetstream,
+    mock_upload,
+    mock_delete,
+    mock_mark_failed,
+    client,
+    db_session,
 ):
     """When the NATS publish fails after the row was committed, the route
-    must return 500 with `START_GENERATION` and the cleanup helper must be
-    invoked with the freshly created generation id.
+    must return 500 with `START_GENERATION`, the cleanup helper must be
+    invoked with the freshly created generation id, AND the uploaded MinIO
+    object must be deleted to avoid leaking orphans.
 
     `_mark_failed_to_queue` is patched because it opens a fresh
     `AsyncSessionLocalFactory` session that would bypass the per-test
-    rollback transaction. Patching it lets us assert the failure path was
-    taken without leaking DB state across tests.
+    rollback transaction.
     """
     community = await _community_with_subscription(db_session)
 
     response = await client.post(
-        "/generation/",
+        "/",
         headers=_admin_headers(community),
-        json={
-            "name": "x",
-            "file_url": "https://example.com/data.csv",
-            "file_name": "data.csv",
-            "injection_name": "production",
-            "algorithm_name": "brute_force",
-            "inputs": {"iterations": 1},
-        },
+        **_multipart_payload(inputs={"iterations": 1}),
     )
 
     assert response.status_code == 500
@@ -409,6 +440,70 @@ async def test_start_generation_publish_failure_returns_500_and_marks_failed(
     failed_id, reason = mock_mark_failed.call_args[0]
     assert isinstance(failed_id, int)
     assert "nats down" in reason
+
+    # Upload happened; rollback delete must have used the same key.
+    mock_upload.assert_awaited_once()
+    uploaded_key = mock_upload.await_args.args[0]
+    mock_delete.assert_awaited_once_with(uploaded_key)
+
+
+@patch(
+    "api.generation.service.storage.upload",
+    new_callable=AsyncMock,
+    side_effect=RuntimeError("minio down"),
+)
+async def test_start_generation_storage_upload_failure_returns_502(mock_upload, client, db_session):
+    """Upload happens before the DB row is written, so a storage failure
+    surfaces as 502 STORAGE_UPLOAD_FAILED and leaves no generation row
+    behind.
+    """
+    community = await _community_with_subscription(db_session)
+
+    response = await client.post(
+        "/",
+        headers=_admin_headers(community),
+        **_multipart_payload(name="upload fails", inputs={"iterations": 1}),
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error_code"] == 2013  # STORAGE_UPLOAD_FAILED
+    mock_upload.assert_awaited_once()
+
+    rows = (
+        (
+            await db_session.execute(
+                select(GenerationModel).where(GenerationModel.name == "upload fails")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
+async def test_start_generation_empty_file_returns_422_and_skips_upload(
+    mock_upload, mock_delete, client, db_session
+):
+    community = await _community_with_subscription(db_session)
+
+    response = await client.post(
+        "/",
+        headers=_admin_headers(community),
+        files={"file": ("empty.csv", b"", "text/csv")},
+        data={
+            "name": "empty file",
+            "injection_name": "production",
+            "algorithm_name": "brute_force",
+            "inputs": json.dumps({"iterations": 1}),
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == 2014  # INVALID_FILE
+    mock_upload.assert_not_awaited()
+    mock_delete.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -438,9 +533,7 @@ async def test_get_allocation_keys_for_generation_returns_partials(client, db_se
         name="Key 2",
     )
 
-    response = await client.get(
-        f"/generation/{generation.id}", headers=_admin_headers(community)
-    )
+    response = await client.get(f"/{generation.id}", headers=_admin_headers(community))
 
     assert response.status_code == 200
     body = response.json()
@@ -454,9 +547,7 @@ async def test_get_allocation_keys_for_generation_returns_partials(client, db_se
     assert surplus_by_name["Key 2"] == 2.0  # 1 iteration * 2.0
 
 
-async def test_get_allocation_keys_for_other_community_returns_empty(
-    client, db_session
-):
+async def test_get_allocation_keys_for_other_community_returns_empty(client, db_session):
     community_a = await _community_with_subscription(db_session)
     community_b = await _community_with_subscription(db_session)
     generation = await create_generation(db_session, id_community=community_b.id)
@@ -466,9 +557,7 @@ async def test_get_allocation_keys_for_other_community_returns_empty(
         id_generation=generation.id,
     )
 
-    response = await client.get(
-        f"/generation/{generation.id}", headers=_admin_headers(community_a)
-    )
+    response = await client.get(f"/{generation.id}", headers=_admin_headers(community_a))
 
     assert response.status_code == 200
     assert response.json()["pagination"]["total"] == 0
@@ -489,9 +578,7 @@ async def test_get_allocation_key_returns_full_tree(client, db_session):
         iteration_surplus=1.0,
     )
 
-    response = await client.get(
-        f"/generation/key/{key.id}", headers=_admin_headers(community)
-    )
+    response = await client.get(f"/key/{key.id}", headers=_admin_headers(community))
 
     assert response.status_code == 200
     data = response.json()["data"]
@@ -505,9 +592,7 @@ async def test_get_allocation_key_returns_full_tree(client, db_session):
 async def test_get_allocation_key_unknown_returns_400_with_2003(client, db_session):
     community = await _community_with_subscription(db_session)
 
-    response = await client.get(
-        "/generation/key/999999", headers=_admin_headers(community)
-    )
+    response = await client.get("/key/999999", headers=_admin_headers(community))
 
     assert response.status_code == 400
     assert response.json()["error_code"] == 2003  # ALLOCATION_KEY_NOT_FOUND
@@ -518,9 +603,7 @@ async def test_get_allocation_key_for_other_community_returns_400(client, db_ses
     community_b = await _community_with_subscription(db_session)
     key = await create_full_key_tree(db_session, id_community=community_b.id)
 
-    response = await client.get(
-        f"/generation/key/{key.id}", headers=_admin_headers(community_a)
-    )
+    response = await client.get(f"/key/{key.id}", headers=_admin_headers(community_a))
 
     assert response.status_code == 400
     assert response.json()["error_code"] == 2003
@@ -531,9 +614,7 @@ async def test_get_allocation_key_for_other_community_returns_400(client, db_ses
 # ---------------------------------------------------------------------------
 
 
-async def test_save_key_copies_local_key_into_crm_and_returns_success(
-    client, db_session
-):
+async def test_save_key_copies_local_key_into_crm_and_returns_success(client, db_session):
     community = await _community_with_subscription(db_session)
     key = await create_full_key_tree(
         db_session,
@@ -546,7 +627,7 @@ async def test_save_key_copies_local_key_into_crm_and_returns_success(
     )
 
     response = await client.post(
-        "/generation/save",
+        "/save",
         headers=_admin_headers(community),
         json={"id_key": key.id},
     )
@@ -573,9 +654,7 @@ async def test_save_key_copies_local_key_into_crm_and_returns_success(
     crm_iterations = (
         (
             await db_session.execute(
-                select(IterationModel).where(
-                    IterationModel.id_allocation_key == crm_key.id
-                )
+                select(IterationModel).where(IterationModel.id_key == crm_key.id)
             )
         )
         .scalars()
@@ -597,13 +676,11 @@ async def test_save_key_copies_local_key_into_crm_and_returns_success(
     assert len(crm_consumers) == 4
 
 
-async def test_save_key_unknown_returns_400_with_allocation_key_not_found(
-    client, db_session
-):
+async def test_save_key_unknown_returns_400_with_allocation_key_not_found(client, db_session):
     community = await _community_with_subscription(db_session)
 
     response = await client.post(
-        "/generation/save",
+        "/save",
         headers=_admin_headers(community),
         json={"id_key": 999999},
     )
@@ -622,7 +699,7 @@ async def test_delete_generation_removes_row(client, db_session):
     generation = await create_generation(db_session, id_community=community.id)
 
     response = await client.delete(
-        f"/generation/generation/{generation.id}",
+        f"/generation/{generation.id}",
         headers=_admin_headers(community),
     )
 
@@ -630,9 +707,7 @@ async def test_delete_generation_removes_row(client, db_session):
     assert response.json()["data"] == "success"
 
     remaining = (
-        await db_session.execute(
-            select(GenerationModel).where(GenerationModel.id == generation.id)
-        )
+        await db_session.execute(select(GenerationModel).where(GenerationModel.id == generation.id))
     ).scalar_one_or_none()
     assert remaining is None
 
@@ -640,17 +715,13 @@ async def test_delete_generation_removes_row(client, db_session):
 async def test_delete_generation_unknown_returns_400_with_2007(client, db_session):
     community = await _community_with_subscription(db_session)
 
-    response = await client.delete(
-        "/generation/generation/999999", headers=_admin_headers(community)
-    )
+    response = await client.delete("/generation/999999", headers=_admin_headers(community))
 
     assert response.status_code == 400
     assert response.json()["error_code"] == 2007  # GENERATION_NOT_FOUND
 
 
-async def test_delete_generation_cascades_to_keys_iterations_consumers(
-    client, db_session
-):
+async def test_delete_generation_cascades_to_keys_iterations_consumers(client, db_session):
     community = await _community_with_subscription(db_session)
     generation = await create_generation(db_session, id_community=community.id)
     key = await create_full_key_tree(
@@ -663,7 +734,7 @@ async def test_delete_generation_cascades_to_keys_iterations_consumers(
     iteration_ids = key.iteration_ids
 
     response = await client.delete(
-        f"/generation/generation/{generation.id}",
+        f"/generation/{generation.id}",
         headers=_admin_headers(community),
     )
 
@@ -671,9 +742,7 @@ async def test_delete_generation_cascades_to_keys_iterations_consumers(
 
     keys = (
         await db_session.execute(
-            select(AllocationKeyGeneratedModel).where(
-                AllocationKeyGeneratedModel.id == key.id
-            )
+            select(AllocationKeyGeneratedModel).where(AllocationKeyGeneratedModel.id == key.id)
         )
     ).scalar_one_or_none()
     assert keys is None
@@ -681,9 +750,7 @@ async def test_delete_generation_cascades_to_keys_iterations_consumers(
     iterations = (
         (
             await db_session.execute(
-                select(IterationGeneratedModel).where(
-                    IterationGeneratedModel.id.in_(iteration_ids)
-                )
+                select(IterationGeneratedModel).where(IterationGeneratedModel.id.in_(iteration_ids))
             )
         )
         .scalars()
@@ -720,18 +787,14 @@ async def test_delete_key_removes_row_and_cascades(client, db_session):
     )
     iteration_ids = key.iteration_ids
 
-    response = await client.delete(
-        f"/generation/key/{key.id}", headers=_admin_headers(community)
-    )
+    response = await client.delete(f"/key/{key.id}", headers=_admin_headers(community))
 
     assert response.status_code == 200
     assert response.json()["data"] == "success"
 
     remaining = (
         await db_session.execute(
-            select(AllocationKeyGeneratedModel).where(
-                AllocationKeyGeneratedModel.id == key.id
-            )
+            select(AllocationKeyGeneratedModel).where(AllocationKeyGeneratedModel.id == key.id)
         )
     ).scalar_one_or_none()
     assert remaining is None
@@ -739,9 +802,7 @@ async def test_delete_key_removes_row_and_cascades(client, db_session):
     iterations = (
         (
             await db_session.execute(
-                select(IterationGeneratedModel).where(
-                    IterationGeneratedModel.id.in_(iteration_ids)
-                )
+                select(IterationGeneratedModel).where(IterationGeneratedModel.id.in_(iteration_ids))
             )
         )
         .scalars()
@@ -750,14 +811,10 @@ async def test_delete_key_removes_row_and_cascades(client, db_session):
     assert iterations == []
 
 
-async def test_delete_key_unknown_returns_400_with_allocation_key_not_found(
-    client, db_session
-):
+async def test_delete_key_unknown_returns_400_with_allocation_key_not_found(client, db_session):
     community = await _community_with_subscription(db_session)
 
-    response = await client.delete(
-        "/generation/key/999999", headers=_admin_headers(community)
-    )
+    response = await client.delete("/key/999999", headers=_admin_headers(community))
 
     assert response.status_code == 400
     assert response.json()["error_code"] == 2003
@@ -771,7 +828,7 @@ async def test_delete_key_unknown_returns_400_with_allocation_key_not_found(
 async def test_get_generations_without_subscription_returns_403(client, db_session):
     community = await create_community(db_session)  # no subscription
 
-    response = await client.get("/generation/", headers=_admin_headers(community))
+    response = await client.get("/", headers=_admin_headers(community))
 
     assert response.status_code == 403
     assert response.json()["error_code"] == 1003  # NOT_SUBSCRIBED
@@ -801,7 +858,7 @@ async def test_delete_generation_for_other_community_returns_400_and_preserves_r
     )
 
     response = await client.delete(
-        f"/generation/generation/{generation_b.id}",
+        f"/generation/{generation_b.id}",
         headers=_admin_headers(community_a),
     )
 
@@ -818,9 +875,7 @@ async def test_delete_generation_for_other_community_returns_400_and_preserves_r
     assert surviving.id_community == community_b.id
 
 
-async def test_delete_key_for_other_community_returns_400_and_preserves_row(
-    client, db_session
-):
+async def test_delete_key_for_other_community_returns_400_and_preserves_row(client, db_session):
     community_a = await _community_with_subscription(db_session)
     community_b = await _community_with_subscription(db_session)
     key_b = await create_full_key_tree(
@@ -831,7 +886,7 @@ async def test_delete_key_for_other_community_returns_400_and_preserves_row(
     )
 
     response = await client.delete(
-        f"/generation/key/{key_b.id}",
+        f"/key/{key_b.id}",
         headers=_admin_headers(community_a),
     )
 
@@ -840,18 +895,14 @@ async def test_delete_key_for_other_community_returns_400_and_preserves_row(
 
     surviving = (
         await db_session.execute(
-            select(AllocationKeyGeneratedModel).where(
-                AllocationKeyGeneratedModel.id == key_b.id
-            )
+            select(AllocationKeyGeneratedModel).where(AllocationKeyGeneratedModel.id == key_b.id)
         )
     ).scalar_one_or_none()
     assert surviving is not None
     assert surviving.id_community == community_b.id
 
 
-async def test_save_key_for_other_community_returns_400_and_does_not_write_crm(
-    client, db_session
-):
+async def test_save_key_for_other_community_returns_400_and_does_not_write_crm(client, db_session):
     community_a = await _community_with_subscription(db_session)
     community_b = await _community_with_subscription(db_session)
     key_b = await create_full_key_tree(
@@ -863,7 +914,7 @@ async def test_save_key_for_other_community_returns_400_and_does_not_write_crm(
     )
 
     response = await client.post(
-        "/generation/save",
+        "/save",
         headers=_admin_headers(community_a),
         json={"id_key": key_b.id},
     )

@@ -10,13 +10,12 @@ email-validator>=2.0.0
 # Nats
 nats-py==2.14.0
 
-# Redis
-redis[asyncio]==5.2.1
-
-# AWS — boto3 and aiobotocore share botocore internally and must be compatible.
-# Let pip resolve the compatible pair. Only pin aiobotocore since it has the tighter constraint.
-# When upgrading, always upgrade both together and verify against:
+# AWS — aiobotocore is the async S3/MinIO client. It pulls a compatible
+# botocore range itself; do not separately pin boto3 unless you need its
+# sync client. When upgrading, verify against:
 # https://github.com/aio-libs/aiobotocore/releases
+aiobotocore==2.15.2
+
 # Logging
 python-json-logger==3.2.0
 

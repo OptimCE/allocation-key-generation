@@ -39,9 +39,5 @@ class Consumer:
         self.surplus_total = float(np.sum(self.surplus))
 
     def compute_energy_allocated_consumed(self) -> None:
-        self.energy_allocated_consumed = np.minimum(
-            self.consumption, self.energy_allocated
-        )
-        self.energy_allocated_consumed_total = float(
-            np.sum(self.energy_allocated_consumed)
-        )
+        self.energy_allocated_consumed = np.minimum(self.consumption, self.energy_allocated)
+        self.energy_allocated_consumed_total = float(np.sum(self.energy_allocated_consumed))

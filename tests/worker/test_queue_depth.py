@@ -38,9 +38,7 @@ async def test_poller_writes_num_pending_into_snapshot(monkeypatch):
     monkeypatch.setattr(worker_main, "registry", fake_registry)
     monkeypatch.setattr(app_metrics, "queue_depth_snapshot", {})
 
-    js = SimpleNamespace(
-        consumer_info=AsyncMock(return_value=SimpleNamespace(num_pending=42))
-    )
+    js = SimpleNamespace(consumer_info=AsyncMock(return_value=SimpleNamespace(num_pending=42)))
     shutdown = asyncio.Event()
 
     async def _stop_after_one_cycle():

@@ -1,5 +1,6 @@
 import datetime
-from sqlalchemy import Integer, TIMESTAMP, Boolean, String, UniqueConstraint
+
+from sqlalchemy import TIMESTAMP, Boolean, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database.database import CrmBase
@@ -20,15 +21,15 @@ class Community(CrmBase):
         unique=True,
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
+        TIMESTAMP,
         nullable=False,
-        default=lambda: datetime.datetime.now(datetime.UTC),
+        default=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
-        TIMESTAMP(timezone=True),
+        TIMESTAMP,
         nullable=False,
-        default=lambda: datetime.datetime.now(datetime.UTC),
-        onupdate=lambda: datetime.datetime.now(datetime.UTC),
+        default=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
+        onupdate=lambda: datetime.datetime.now(datetime.UTC).replace(tzinfo=None),
     )
 
 
