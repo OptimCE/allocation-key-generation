@@ -95,11 +95,11 @@ class Settings(BaseSettings):
                 raise ValueError("STORAGE_SECRET_KEY is required in staging/production")
         if self.ENV == Environment.PRODUCTION:
             if not self.LOGGING_TOKEN:
-                raise ValueError("COCKPIT_TOKEN required for staging/production")
+                raise ValueError("LOGGING_TOKEN required for staging/production")
             if not self.LOGGING_LOGS_URL:
-                raise ValueError("COCKPIT_LOGS_URL required for staging/production")
+                raise ValueError("LOGGING_LOGS_URL required for staging/production")
             if not self.LOGGING_METRICS_URL:
-                raise ValueError("COCKPIT_METRICS_URL required for staging/production")
+                raise ValueError("LOGGING_METRICS_URL required for staging/production")
         return self
 
 

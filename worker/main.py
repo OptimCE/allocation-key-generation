@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import pathlib
 import signal
 import sys
 
@@ -46,6 +47,13 @@ _QUEUE_DEPTH_POLL_INTERVAL_SECONDS = 15
 # per core/queue/streams.json. If a future algorithm uses a different
 # stream, extend AlgorithmMetadata with a stream name and read it here.
 _ALGORITHM_STREAM_NAME = "ALGORITHMS"
+
+# Touched by the queue-depth poller whenever a NATS consumer_info round-trip
+# succeeds. Container HEALTHCHECK in Dockerfile.worker reads this file's
+# mtime to distinguish a live worker from a hung one (NATS lost, async
+# deadlock, etc.). Path is /tmp because the non-root app user can write it
+# without extra volume setup.
+_HEARTBEAT_PATH = pathlib.Path("/tmp/worker.alive")  # noqa: S108 — dedicated container, non-root app user, no other writers
 
 
 async def _connect_nats_with_retry() -> None:
@@ -88,12 +96,21 @@ async def _poll_queue_depth(js, shutdown_event: asyncio.Event) -> None:
     info call doesn't tear down the worker.
     """
     while not shutdown_event.is_set():
+        any_success = False
         for meta in registry.list_all():
             try:
                 info = await js.consumer_info(_ALGORITHM_STREAM_NAME, f"worker-{meta.name}")
                 app_metrics.queue_depth_snapshot[meta.name] = int(info.num_pending)
+                any_success = True
             except Exception as exc:
                 logger.debug("queue depth poll failed for %s: %s", meta.name, exc)
+        # Only refresh the heartbeat when at least one consumer_info round-trip
+        # worked: otherwise a fully-disconnected worker would still look alive.
+        if any_success:
+            try:
+                await asyncio.to_thread(_HEARTBEAT_PATH.touch)
+            except OSError as exc:
+                logger.debug("heartbeat touch failed: %s", exc)
         try:
             await asyncio.wait_for(
                 shutdown_event.wait(), timeout=_QUEUE_DEPTH_POLL_INTERVAL_SECONDS

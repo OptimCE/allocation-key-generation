@@ -33,7 +33,7 @@ def setup_tracer_provider() -> None:
     )
     headers = {"Authorization": f"Bearer {settings.LOGGING_TOKEN}"}
 
-    # --- Logs (Loki) ---
+    # --- Logs ---
     log_exporter = OTLPLogExporter(
         endpoint=settings.LOGGING_LOGS_URL,
         headers=headers,
@@ -43,12 +43,12 @@ def setup_tracer_provider() -> None:
     log_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
     handler = LoggingHandler(level=logging.INFO, logger_provider=log_provider)
     # Stamp request_id / user_id / community_id / user_role onto every record
-    # before it's serialised and shipped to Loki. Without this, prod logs lose
+    # before it's serialised and exported. Without this, prod logs lose
     # the per-request context that staging/local gain from configure_logging().
     handler.addFilter(RequestIdFilter())
     logging.getLogger().addHandler(handler)
 
-    # --- Metrics (Mimir) ---
+    # --- Metrics ---
     metric_exporter = OTLPMetricExporter(
         endpoint=settings.LOGGING_METRICS_URL,
         headers=headers,

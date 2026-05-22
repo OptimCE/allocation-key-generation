@@ -49,7 +49,7 @@ def test_queue_depth_callback_emits_one_observation_per_algorithm(monkeypatch):
 
 
 def test_queue_depth_callback_emits_nothing_when_snapshot_empty(monkeypatch):
-    """No subscriptions, no observations — keeps Mimir series count sane."""
+    """No subscriptions, no observations — keeps the backend series count sane."""
     monkeypatch.setattr(app_metrics, "queue_depth_snapshot", {})
 
     observations = list(app_metrics._queue_depth_callback(options=None))

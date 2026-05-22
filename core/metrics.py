@@ -14,7 +14,7 @@ and re-fetch instruments from that provider.
 
 Naming follows OTel semantic conventions: dotted lowercase, ``.total``
 suffix on monotonically increasing counters, units in seconds for
-duration histograms. Mimir / Prometheus translates these to
+duration histograms. The backend translates these to
 ``generations_created_total`` etc.
 """
 

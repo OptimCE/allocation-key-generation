@@ -50,9 +50,9 @@ async def readiness() -> JSONResponse:
         "nats": nats_result,
     }
 
-    # Emit one counter point per component per probe. Mimir can then plot
-    # the failure rate (rate(health_checks_total{ok="false"}[5m])) and we
-    # can alert on it without parsing log lines.
+    # Emit one counter point per component per probe so the metrics backend
+    # can plot the failure rate (rate(health_checks_total{ok="false"}[5m]))
+    # and alert on it without parsing log lines.
     for component, result in checks.items():
         app_metrics.health_checks.add(
             1,

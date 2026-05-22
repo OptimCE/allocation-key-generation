@@ -72,7 +72,7 @@ def configure_logging() -> None:
         root.addHandler(handler)
         root.setLevel(logging.INFO)
     else:
-        # production: logs exported to Cockpit via OpenTelemetry, no console output
+        # production: logs exported via OpenTelemetry (OTLP), no console output
         root.setLevel(logging.INFO)
 
     # Silence noisy third-party loggers

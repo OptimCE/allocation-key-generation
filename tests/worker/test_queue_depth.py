@@ -1,9 +1,9 @@
 """Tests for the queue-depth poller in worker/main.py.
 
 The poller is what feeds the ``nats.queue.depth`` observable gauge — if
-it stops updating, Mimir would see a flat line and we'd miss a NATS
-backlog. These tests exercise it against a fake JetStream so we don't
-need a real NATS broker.
+it stops updating, the metrics backend would see a flat line and we'd
+miss a NATS backlog. These tests exercise it against a fake JetStream
+so we don't need a real NATS broker.
 """
 
 from __future__ import annotations

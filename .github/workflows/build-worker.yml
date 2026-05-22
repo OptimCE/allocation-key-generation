@@ -1,4 +1,4 @@
-name: Docker (API)
+name: Docker (Worker)
 
 on:
   workflow_dispatch:
@@ -6,33 +6,29 @@ on:
     branches: [main]
     tags: ['v*.*.*']
     paths:
-      - 'Dockerfile.production'
-      - 'main.py'
-      - 'api/**'
+      - 'Dockerfile.worker'
       - 'core/**'
       - 'algorithms/**'
       - 'shared/**'
       - 'worker/**'
       - 'locales/**'
       - 'requirements/base.txt'
-      - 'requirements/api.txt'
+      - 'requirements/worker.txt'
       - '.dockerignore'
-      - '.github/workflows/build.yml'
+      - '.github/workflows/build-worker.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'Dockerfile.production'
-      - 'main.py'
-      - 'api/**'
+      - 'Dockerfile.worker'
       - 'core/**'
       - 'algorithms/**'
       - 'shared/**'
       - 'worker/**'
       - 'locales/**'
       - 'requirements/base.txt'
-      - 'requirements/api.txt'
+      - 'requirements/worker.txt'
       - '.dockerignore'
-      - '.github/workflows/build.yml'
+      - '.github/workflows/build-worker.yml'
 
 env:
   REGISTRY: ghcr.io
@@ -66,15 +62,15 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           flavor: |
-            suffix=-prod,onlatest=true
+            suffix=-worker,onlatest=true
 
-      - name: Build and push (prod)
+      - name: Build and push (worker)
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.production
+          file: Dockerfile.worker
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=prod
-          cache-to: type=gha,mode=max,scope=prod
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
