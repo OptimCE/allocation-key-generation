@@ -36,5 +36,47 @@
     "OLAGSA": {
       "DESCRIPTION": "Lineaire optimalisatie en genetisch algoritme met atypische speciatie"
     }
+  },
+  "PARAMETERS": {
+    "OLAGSA": {
+      "ITERATIONS": {
+        "TITLE": "Aantal iteraties",
+        "DESCRIPTION": "Aantal iteraties van het genetisch algoritme."
+      },
+      "GENERATIONS": {
+        "TITLE": "Aantal generaties",
+        "DESCRIPTION": "Aantal generaties per iteratie."
+      },
+      "POPULATION_SIZE": {
+        "TITLE": "Populatiegrootte",
+        "DESCRIPTION": "Aantal individuen in de beginpopulatie."
+      },
+      "CROSSOVER_RATE": {
+        "TITLE": "Kruisingssnelheid",
+        "DESCRIPTION": "Kruisingssnelheid tussen twee individuen van dezelfde soort (tussen 0 en 1)."
+      },
+      "INTER_SPECIES_CROSSOVER_RATE": {
+        "TITLE": "Kruisingssnelheid tussen soorten",
+        "DESCRIPTION": "Kruisingssnelheid tussen twee individuen van verschillende soorten (tussen 0 en 1)."
+      },
+      "MUTATION_RATE": {
+        "TITLE": "Mutatiesnelheid",
+        "DESCRIPTION": "Kans dat een nieuw individu muteert (tussen 0 en 1)."
+      },
+      "EXPECTED_SPECIES_COUNT": {
+        "TITLE": "Verwacht aantal soorten",
+        "DESCRIPTION": "Verwacht aantal soorten. Als iteraties = 3, is het aantal soorten 4^x, waarbij x de ingevoerde parameterwaarde is."
+      },
+      "MAX_GENERATIONS_WITHOUT_IMPROVEMENT": {
+        "TITLE": "Max. generaties zonder verbetering",
+        "DESCRIPTION": "Maximum aantal generaties zonder verbetering voordat het proces wordt gestopt."
+      }
+    },
+    "BRUTE_FORCE": {
+      "ITERATIONS": {
+        "TITLE": "Aantal iteraties",
+        "DESCRIPTION": "Aantal geneste iteraties van de brute-force-opsomming. Moet 1, 2 of 3 zijn."
+      }
+    }
   }
 }

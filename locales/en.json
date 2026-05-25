@@ -36,5 +36,47 @@
     "OLAGSA": {
       "DESCRIPTION": "Linear Optimization and Genetic Algorithm with Atypical Speciation"
     }
+  },
+  "PARAMETERS": {
+    "OLAGSA": {
+      "ITERATIONS": {
+        "TITLE": "Number of iterations",
+        "DESCRIPTION": "Number of iterations of the genetic algorithm."
+      },
+      "GENERATIONS": {
+        "TITLE": "Number of generations",
+        "DESCRIPTION": "Number of generations per iteration."
+      },
+      "POPULATION_SIZE": {
+        "TITLE": "Population size",
+        "DESCRIPTION": "Number of individuals in the initial population."
+      },
+      "CROSSOVER_RATE": {
+        "TITLE": "Crossover rate",
+        "DESCRIPTION": "Crossover rate between two individuals of the same species (between 0 and 1)."
+      },
+      "INTER_SPECIES_CROSSOVER_RATE": {
+        "TITLE": "Inter-species crossover rate",
+        "DESCRIPTION": "Crossover rate between two individuals of different species (between 0 and 1)."
+      },
+      "MUTATION_RATE": {
+        "TITLE": "Mutation rate",
+        "DESCRIPTION": "Probability that a new individual mutates (between 0 and 1)."
+      },
+      "EXPECTED_SPECIES_COUNT": {
+        "TITLE": "Expected species count",
+        "DESCRIPTION": "Expected number of species. If iterations = 3, the species count will be 4^x, where x is the parameter value."
+      },
+      "MAX_GENERATIONS_WITHOUT_IMPROVEMENT": {
+        "TITLE": "Max generations without improvement",
+        "DESCRIPTION": "Maximum number of generations without improvement before stopping the process."
+      }
+    },
+    "BRUTE_FORCE": {
+      "ITERATIONS": {
+        "TITLE": "Number of iterations",
+        "DESCRIPTION": "Number of nested brute-force enumeration iterations. Must be 1, 2, or 3."
+      }
+    }
   }
 }

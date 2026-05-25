@@ -36,5 +36,47 @@
     "OLAGSA": {
       "DESCRIPTION": "Lineare Optimierung und genetischer Algorithmus mit atypischer Speziation"
     }
+  },
+  "PARAMETERS": {
+    "OLAGSA": {
+      "ITERATIONS": {
+        "TITLE": "Anzahl der Iterationen",
+        "DESCRIPTION": "Anzahl der Iterationen des genetischen Algorithmus."
+      },
+      "GENERATIONS": {
+        "TITLE": "Anzahl der Generationen",
+        "DESCRIPTION": "Anzahl der Generationen pro Iteration."
+      },
+      "POPULATION_SIZE": {
+        "TITLE": "Populationsgröße",
+        "DESCRIPTION": "Anzahl der Individuen in der Anfangspopulation."
+      },
+      "CROSSOVER_RATE": {
+        "TITLE": "Kreuzungsrate",
+        "DESCRIPTION": "Kreuzungsrate zwischen zwei Individuen derselben Spezies (zwischen 0 und 1)."
+      },
+      "INTER_SPECIES_CROSSOVER_RATE": {
+        "TITLE": "Artenübergreifende Kreuzungsrate",
+        "DESCRIPTION": "Kreuzungsrate zwischen zwei Individuen verschiedener Spezies (zwischen 0 und 1)."
+      },
+      "MUTATION_RATE": {
+        "TITLE": "Mutationsrate",
+        "DESCRIPTION": "Wahrscheinlichkeit, dass ein neues Individuum mutiert (zwischen 0 und 1)."
+      },
+      "EXPECTED_SPECIES_COUNT": {
+        "TITLE": "Erwartete Artenanzahl",
+        "DESCRIPTION": "Erwartete Anzahl von Spezies. Bei Iterationen = 3 beträgt die Artenanzahl 4^x, wobei x der eingegebene Parameterwert ist."
+      },
+      "MAX_GENERATIONS_WITHOUT_IMPROVEMENT": {
+        "TITLE": "Max. Generationen ohne Verbesserung",
+        "DESCRIPTION": "Maximale Anzahl von Generationen ohne Verbesserung, bevor der Prozess abgebrochen wird."
+      }
+    },
+    "BRUTE_FORCE": {
+      "ITERATIONS": {
+        "TITLE": "Anzahl der Iterationen",
+        "DESCRIPTION": "Anzahl der verschachtelten Brute-Force-Enumerationsiterationen. Muss 1, 2 oder 3 sein."
+      }
+    }
   }
 }

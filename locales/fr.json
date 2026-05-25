@@ -36,5 +36,47 @@
     "OLAGSA": {
       "DESCRIPTION": "Optimisation Linéaire et Algorithme Génétique avec Spéciation Atypique"
     }
+  },
+  "PARAMETERS": {
+    "OLAGSA": {
+      "ITERATIONS": {
+        "TITLE": "Nombre d'itérations",
+        "DESCRIPTION": "Nombre d'itérations de l'algorithme génétique."
+      },
+      "GENERATIONS": {
+        "TITLE": "Nombre de générations",
+        "DESCRIPTION": "Nombre de générations par itération."
+      },
+      "POPULATION_SIZE": {
+        "TITLE": "Taille de la population",
+        "DESCRIPTION": "Nombre d'individus dans la population initiale."
+      },
+      "CROSSOVER_RATE": {
+        "TITLE": "Taux de croisement",
+        "DESCRIPTION": "Taux de croisement entre deux individus d'une même espèce (entre 0 et 1)."
+      },
+      "INTER_SPECIES_CROSSOVER_RATE": {
+        "TITLE": "Taux de croisement inter-espèce",
+        "DESCRIPTION": "Taux de croisement entre deux individus d'espèces différentes (entre 0 et 1)."
+      },
+      "MUTATION_RATE": {
+        "TITLE": "Taux de mutation",
+        "DESCRIPTION": "Chance qu'un nouvel individu mute (entre 0 et 1)."
+      },
+      "EXPECTED_SPECIES_COUNT": {
+        "TITLE": "Nombre d'espèces attendues",
+        "DESCRIPTION": "Nombre d'espèces attendues. Si itérations = 3, le nombre d'espèces sera de 4^x, où x est la valeur rentrée en paramètre."
+      },
+      "MAX_GENERATIONS_WITHOUT_IMPROVEMENT": {
+        "TITLE": "Générations max sans amélioration",
+        "DESCRIPTION": "Nombre de générations maximum sans amélioration avant d'arrêter le processus."
+      }
+    },
+    "BRUTE_FORCE": {
+      "ITERATIONS": {
+        "TITLE": "Nombre d'itérations",
+        "DESCRIPTION": "Nombre d'itérations imbriquées de l'énumération brute-force. Doit être 1, 2 ou 3."
+      }
+    }
   }
 }

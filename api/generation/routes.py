@@ -10,6 +10,7 @@ from api.generation.schemas import (
     GenerateRequest,
     GenerateResponse,
     Generation,
+    LocalizedAlgorithmMetadata,
     PartialAllocationKeyGenerated,
     SaveKey,
 )
@@ -34,10 +35,29 @@ generation_routes = APIRouter(
 )
 
 
-def _localize_metadata(meta: AlgorithmMetadata) -> AlgorithmMetadata:
+def _localize_metadata(meta: AlgorithmMetadata) -> LocalizedAlgorithmMetadata:
     # current_locale defaults to "fr_FR"; SUPPORTED_LOCALES holds bare codes.
     locale = current_locale.get().split("_")[0]
-    return meta.model_copy(update={"description": translate(meta.description, locale=locale)})
+    raw_schema: dict = meta.input_schema.model_json_schema()
+    localized_properties = {}
+    for field_name, field_schema in raw_schema.get("properties", {}).items():
+        localized_field = dict(field_schema)
+        if "title" in localized_field:
+            localized_field["title"] = translate(localized_field["title"], locale=locale)
+        if "description" in localized_field:
+            localized_field["description"] = translate(
+                localized_field["description"], locale=locale
+            )
+        localized_properties[field_name] = localized_field
+    return LocalizedAlgorithmMetadata(
+        name=meta.name,
+        description=translate(meta.description, locale=locale),
+        version=meta.version,
+        queue=meta.queue,
+        input_schema={**raw_schema, "properties": localized_properties},
+        tags=meta.tags,
+        timeout_seconds=meta.timeout_seconds,
+    )
 
 
 # GET (/) : List of generation and their status (pending, success, fails)
@@ -56,23 +76,23 @@ async def get_generations(
 
 
 # GET (/algorithms) : List of available algorithms
-@generation_routes.get("/algorithms", response_model=ApiResponse[list[AlgorithmMetadata]])
+@generation_routes.get("/algorithms", response_model=ApiResponse[list[LocalizedAlgorithmMetadata]])
 @with_default_error(default_error=errors.generation.GET_ALGORITHMS)
 async def get_algorithms():
     data = [_localize_metadata(meta) for meta in registry.list_all()]
-    return ApiResponse[list[AlgorithmMetadata]](data=data)
+    return ApiResponse[list[LocalizedAlgorithmMetadata]](data=data)
 
 
 # GET (/algorithms/{algorithm_name}): Input's list for the specified algorithms
 @generation_routes.get(
-    "/algorithms/{algorithm_name}", response_model=ApiResponse[AlgorithmMetadata]
+    "/algorithms/{algorithm_name}", response_model=ApiResponse[LocalizedAlgorithmMetadata]
 )
 @with_default_error(default_error=errors.generation.GET_ALGORITHM_INPUT)
 async def get_algorithm_inputs(algorithm_name: str):
     if algorithm_name not in registry:
         raise ErrorException(error=errors.generation.ALGORITHM_NOT_FOUND, status_code=404)
-    data = registry.metadata(algorithm_name)
-    return ApiResponse[AlgorithmMetadata](data=data)
+    data = _localize_metadata(registry.metadata(algorithm_name))
+    return ApiResponse[LocalizedAlgorithmMetadata](data=data)
 
 
 # GET (/key/{id}) : Key generated

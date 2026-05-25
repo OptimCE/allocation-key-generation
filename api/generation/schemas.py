@@ -84,3 +84,21 @@ class GenerateResponse(BaseModel):
 
     id: int = Field(..., description="ID of the freshly created generation row.")
     status: GenerationStatus = Field(..., description="Initial status (always PENDING on success).")
+
+
+class LocalizedAlgorithmMetadata(BaseModel):
+    """AlgorithmMetadata with input_schema already serialized and localized.
+
+    Used as the response_model for GET /algorithms and GET /algorithms/{name}.
+    Unlike AlgorithmMetadata (which holds a Pydantic model class), this carries
+    a plain dict so FastAPI can serialize it directly without triggering the
+    base @field_serializer, and with titles/descriptions already translated.
+    """
+
+    name: str
+    description: str
+    version: str
+    queue: str
+    input_schema: dict[str, Any]
+    tags: list[str]
+    timeout_seconds: int | None
