@@ -63,3 +63,32 @@ CREATE TABLE IF NOT EXISTS consumer (
     created_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- Mirrors shared/models/crm_models.py::AppUserModel. Only the columns the
+-- audit log service reads — auth_user_id -> (id, email) — are present.
+
+CREATE TABLE IF NOT EXISTS app_user (
+    id            INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    auth_user_id  VARCHAR(255) NOT NULL UNIQUE,
+    email         VARCHAR(256) NOT NULL
+);
+
+
+-- Mirrors shared/models/crm_models.py::AuditLogModel and the production DDL
+-- in crm-backend/database_script/2026-05-27_audit_log.sql. Append-only by
+-- convention. Indexes from the production migration are omitted here — they
+-- exist only to keep production reads fast and don't affect test correctness.
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id_community INTEGER REFERENCES community(id) ON DELETE CASCADE,
+    timestamp    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    action       VARCHAR(128) NOT NULL,
+    source       VARCHAR(32)  NOT NULL,
+    entity_type  VARCHAR(64)  NOT NULL,
+    entity_id    VARCHAR(64),
+    user_id      INTEGER,
+    user_email   VARCHAR(256),
+    payload      JSONB        NOT NULL DEFAULT '{}'::jsonb
+);

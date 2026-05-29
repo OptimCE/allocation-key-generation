@@ -30,7 +30,8 @@ from sqlalchemy import update
 
 from algorithms.base import AlgorithmResult
 from core import metrics as app_metrics
-from core.database.database import AsyncSessionLocalFactory
+from core.database.database import AsyncSessionCRMFactory, AsyncSessionLocalFactory
+from shared.audit_log import AuditActions, AuditLogInput, AuditLogService
 from shared.const import GenerationStatus
 from shared.models.local_models import (
     AllocationKeyGeneratedModel,
@@ -121,6 +122,23 @@ async def save_success(generation_id: int, result: AlgorithmResult) -> None:
             {"algorithm": generation.algorithm_name, "status": "success"},
         )
 
+    # Audit after the local result is committed. The audit service swallows
+    # its own errors, so a CRM hiccup never rolls back the generation result.
+    async with AsyncSessionCRMFactory() as crm_session:
+        await AuditLogService(crm_session).log(
+            AuditLogInput(
+                action=AuditActions.GENERATION_SUCCEEDED,
+                entity_type="generation",
+                entity_id=str(generation_id),
+                payload={
+                    "algorithm_name": generation.algorithm_name,
+                    "key_count": len(result.keys),
+                },
+            ),
+            id_community=community_id,
+        )
+        await crm_session.commit()
+
 
 async def save_failure(generation_id: int, error_message: str) -> None:
     """Mark a generation FAILED with the given message.
@@ -153,7 +171,26 @@ async def save_failure(generation_id: int, error_message: str) -> None:
             return
 
         await session.commit()
+        algorithm_name = generation.algorithm_name
+        id_community = generation.id_community
         app_metrics.generations_completed.add(
             1,
-            {"algorithm": generation.algorithm_name, "status": "failed"},
+            {"algorithm": algorithm_name, "status": "failed"},
         )
+
+    # Audit after the local commit. Same rationale as save_success: a CRM
+    # hiccup here must not mask the local FAILED state.
+    async with AsyncSessionCRMFactory() as crm_session:
+        await AuditLogService(crm_session).log(
+            AuditLogInput(
+                action=AuditActions.GENERATION_FAILED,
+                entity_type="generation",
+                entity_id=str(generation_id),
+                payload={
+                    "algorithm_name": algorithm_name,
+                    "error_message": error_message[:_ERROR_MESSAGE_MAX_LEN],
+                },
+            ),
+            id_community=id_community,
+        )
+        await crm_session.commit()
