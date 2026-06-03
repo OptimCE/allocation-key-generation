@@ -39,9 +39,7 @@ class AuditLogService:
         """
         try:
             resolved_community = (
-                id_community
-                if id_community is not None
-                else current_internal_community_id.get()
+                id_community if id_community is not None else current_internal_community_id.get()
             )
             auth_user_id = current_user_id.get()
 
@@ -66,8 +64,14 @@ class AuditLogService:
                 user_email=user_email,
                 payload=entry.payload or {},
             )
-            self.crm_session.add(audit_row)
-            await self.crm_session.flush()
+            # Stage the insert inside a SAVEPOINT so a failure (FK violation,
+            # constraint, transient error) rolls back only this nested write
+            # and leaves the caller's outer transaction clean and usable. The
+            # explicit flush forces the INSERT — and its constraint checks — to
+            # surface within the savepoint scope, where the rollback is absorbed.
+            async with self.crm_session.begin_nested():
+                self.crm_session.add(audit_row)
+                await self.crm_session.flush()
         except Exception:
             # Audit must never break the caller's business write. Log loudly
             # so dropped audits remain visible in the application log.
