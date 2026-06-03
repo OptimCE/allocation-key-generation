@@ -23,10 +23,11 @@ from api.generation.schemas import (
 from core import metrics as app_metrics
 from core import storage
 from core.api_response import Pagination
-from core.database.database import AsyncSessionLocalFactory
+from core.database.database import AsyncSessionCRMFactory, AsyncSessionLocalFactory
 from core.errors.errors import ErrorException
 from core.queue.helper import Event, send_event
 from core.queue.init import get_jetstream
+from shared.audit_log import AuditActions, AuditLogInput, AuditLogService
 from shared.const import GenerationStatus
 from shared.crm_repository import CRMRepository
 from shared.custom_errors import errors
@@ -41,6 +42,7 @@ class GenerationService:
         self.crm_session = crm_session
         self.repository = GenerationRepository(local_session)
         self.crm_repository = CRMRepository(crm_session)
+        self.audit_log_service = AuditLogService(crm_session)
 
     async def get_generations(
         self, page: int, page_size: int, query_param: dict
@@ -149,6 +151,20 @@ class GenerationService:
             raise
         generation_id = model.id
         app_metrics.generations_created.add(1, {"algorithm": meta.name})
+        await self.audit_log_service.log(
+            AuditLogInput(
+                action=AuditActions.GENERATION_CREATED,
+                entity_type="generation",
+                entity_id=str(generation_id),
+                payload={
+                    "name": req.name,
+                    "algorithm_name": meta.name,
+                    "algorithm_version": meta.version,
+                    "file_name": file_name,
+                    "injection_name": req.injection_name,
+                },
+            )
+        )
 
         # 6. Publish event to the algorithm's queue. On failure, mark the
         # row FAILED in a separate transaction and delete the orphan object.
@@ -176,6 +192,8 @@ class GenerationService:
         Uses a fresh session because the request session may already be in
         an inconsistent state by the time we get here.
         """
+        algorithm_name: str | None = None
+        id_community: int | None = None
         async with AsyncSessionLocalFactory() as session:
             row = await session.get(GenerationModel, generation_id)
             if row is None:
@@ -183,10 +201,29 @@ class GenerationService:
             row.status = GenerationStatus.FAILED
             row.error_message = f"failed_to_queue: {reason}"[:2000]
             await session.commit()
+            algorithm_name = row.algorithm_name
+            id_community = row.id_community
             app_metrics.generations_completed.add(
                 1,
                 {"algorithm": row.algorithm_name, "status": "failed"},
             )
+
+        # Use a fresh CRM session for the audit row — same rationale as the
+        # local session above.
+        async with AsyncSessionCRMFactory() as crm_session:
+            await AuditLogService(crm_session).log(
+                AuditLogInput(
+                    action=AuditActions.GENERATION_QUEUE_FAILED,
+                    entity_type="generation",
+                    entity_id=str(generation_id),
+                    payload={
+                        "reason": reason[:500],
+                        "algorithm_name": algorithm_name,
+                    },
+                ),
+                id_community=id_community,
+            )
+            await crm_session.commit()
 
     async def save_key(self, saved_key: SaveKey):
         # Retrieve it in this database
@@ -198,20 +235,57 @@ class GenerationService:
         # Save it in crm database
         await self.crm_repository.save_allocation_key(allocation_key)
         await self.crm_session.commit()
+        await self.audit_log_service.log(
+            AuditLogInput(
+                action=AuditActions.ALLOCATION_KEY_SAVED,
+                entity_type="allocation_key",
+                entity_id=str(allocation_key.id),
+                payload={
+                    "local_key_id": saved_key.id_key,
+                    "name": allocation_key.name,
+                },
+            )
+        )
 
     async def delete_generation(self, id_generation):
         generation = await self.repository.get_generation(id_generation)
         if not generation:
             raise ErrorException(error=errors.generation.GENERATION_NOT_FOUND, status_code=400)
+        algorithm_name = generation.algorithm_name
+        status_name = GenerationStatus(generation.status).name
         await self.repository.delete_generation(generation)
         await self.local_session.commit()
+        await self.audit_log_service.log(
+            AuditLogInput(
+                action=AuditActions.GENERATION_DELETED,
+                entity_type="generation",
+                entity_id=str(id_generation),
+                payload={
+                    "algorithm_name": algorithm_name,
+                    "status": status_name,
+                },
+            )
+        )
 
     async def delete_key(self, id_key):
         key = await self.repository.get_allocation_key(id_key)
         if not key:
             raise ErrorException(error=errors.generation.ALLOCATION_KEY_NOT_FOUND, status_code=400)
+        key_name = key.name
+        id_generation = key.id_generation
         await self.repository.delete_key(key)
         await self.local_session.commit()
+        await self.audit_log_service.log(
+            AuditLogInput(
+                action=AuditActions.ALLOCATION_KEY_GENERATED_DELETED,
+                entity_type="allocation_key_generated",
+                entity_id=str(id_key),
+                payload={
+                    "name": key_name,
+                    "id_generation": id_generation,
+                },
+            )
+        )
 
 
 async def _best_effort_delete(storage_key: str) -> None:
