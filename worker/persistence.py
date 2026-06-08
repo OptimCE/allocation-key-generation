@@ -30,8 +30,8 @@ from sqlalchemy import update
 
 from algorithms.base import AlgorithmResult
 from core import metrics as app_metrics
+from core.audit_log import AuditActions, AuditLogInput, AuditLogService
 from core.database.database import AsyncSessionCRMFactory, AsyncSessionLocalFactory
-from shared.audit_log import AuditActions, AuditLogInput, AuditLogService
 from shared.const import GenerationStatus
 from shared.models.local_models import (
     AllocationKeyGeneratedModel,

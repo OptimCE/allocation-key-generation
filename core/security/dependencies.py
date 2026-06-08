@@ -12,7 +12,7 @@ from core.errors.errors import ErrorException
 from core.security.user_context import ROLE_HIERARCHY, Role
 from shared.const import FeatureName
 from shared.custom_errors import errors
-from shared.database.with_community import with_community_scope
+from core.database.with_community import with_community_scope
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,8 @@
 import datetime
+from typing import Any
 
-from sqlalchemy import TIMESTAMP, Boolean, Integer, String, UniqueConstraint
+from sqlalchemy import TIMESTAMP, BigInteger, Boolean, Integer, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database.database import CrmBase
@@ -68,3 +70,21 @@ class CommunitySubscription(CrmBase):
         default=lambda: datetime.datetime.now(datetime.UTC),
         onupdate=lambda: datetime.datetime.now(datetime.UTC),
     )
+
+
+class AuditLogModel(CrmBase):
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id_community: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timestamp: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    action: Mapped[str] = mapped_column(String(128), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    user_email: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)

@@ -3,9 +3,10 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.audit_log.dtos import AuditLogInput
 from core.context_vars import current_internal_community_id, current_user_id
-from shared.audit_log.dtos import AuditLogInput
-from shared.models.crm_models import AppUserModel, AuditLogModel
+from core.database.models import AuditLogModel
+from shared.models.crm_models import AppUserModel
 
 logger = logging.getLogger(__name__)
 

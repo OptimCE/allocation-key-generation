@@ -3,7 +3,7 @@ from typing import cast
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from shared.database.with_community import with_community_scope
+from core.database.with_community import with_community_scope
 from shared.models.local_models import (
     AllocationKeyGeneratedModel,
     GenerationModel,

@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from shared.audit_log.actions import AuditAction
+from core.audit_log.actions import AuditAction
 
 
 class AuditLogInput(BaseModel):

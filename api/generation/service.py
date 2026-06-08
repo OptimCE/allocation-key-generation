@@ -23,11 +23,11 @@ from api.generation.schemas import (
 from core import metrics as app_metrics
 from core import storage
 from core.api_response import Pagination
+from core.audit_log import AuditActions, AuditLogInput, AuditLogService
 from core.database.database import AsyncSessionCRMFactory, AsyncSessionLocalFactory
 from core.errors.errors import ErrorException
 from core.queue.helper import Event, send_event
 from core.queue.init import get_jetstream
-from shared.audit_log import AuditActions, AuditLogInput, AuditLogService
 from shared.const import GenerationStatus
 from shared.crm_repository import CRMRepository
 from shared.custom_errors import errors

@@ -840,8 +840,6 @@ async def test_get_generations_without_subscription_returns_403(client, db_sessi
 # Read routes already have isolation tests (see test_get_generations_returns_
 # only_current_community, test_get_allocation_keys_for_other_community_returns_
 # empty, test_get_allocation_key_for_other_community_returns_400). The audit
-# in PRODUCTION_ROADMAP.md called out the DELETE/save routes as the spot-
-# check gap; these tests close it by proving that:
 #   1. Cross-community DELETE returns the "not found" error and leaves the
 #      target row intact (no silent cross-tenant deletion).
 #   2. Cross-community save returns "not found" and writes nothing to CRM.

@@ -3,8 +3,8 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.audit_log.service import AuditLogService
 from core.database.database import get_crm_session
-from shared.audit_log.service import AuditLogService
 
 
 async def get_audit_log_service(
