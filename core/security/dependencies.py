@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.context_vars import current_community_id, current_user_id, current_user_role
 from core.database.database import get_crm_session
 from core.database.models import CommunitySubscription
+from core.database.with_community import with_community_scope
 from core.errors.errors import ErrorException
 from core.security.user_context import ROLE_HIERARCHY, Role
 from shared.const import FeatureName
 from shared.custom_errors import errors
-from core.database.with_community import with_community_scope
 
 logger = logging.getLogger(__name__)
 
