@@ -140,9 +140,7 @@ class _SolverPool(Executor):
         self._pool = self._new_pool()
 
     def _new_pool(self) -> ProcessPoolExecutor:
-        return ProcessPoolExecutor(
-            max_workers=self._max_workers, initializer=self._initializer
-        )
+        return ProcessPoolExecutor(max_workers=self._max_workers, initializer=self._initializer)
 
     def submit(self, fn, /, *args, **kwargs):
         try:

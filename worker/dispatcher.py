@@ -169,9 +169,7 @@ def _make_handler(
         if inflight is not None:
             inflight.discard(task)
         if not task.cancelled() and task.exception() is not None:
-            logger.error(
-                "Generation handler task for %s crashed: %r", meta.queue, task.exception()
-            )
+            logger.error("Generation handler task for %s crashed: %r", meta.queue, task.exception())
 
     async def handle(msg: Msg) -> None:
         if inflight is None:

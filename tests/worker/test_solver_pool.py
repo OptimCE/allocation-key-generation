@@ -108,7 +108,7 @@ def test_detect_cpus_reads_cgroup_v2_quota(monkeypatch):
 
 
 def test_detect_cpus_cgroup_v2_unlimited_falls_through(monkeypatch):
-    """"max" quota means unlimited → fall back to a sane positive count."""
+    """ "max" quota means unlimited → fall back to a sane positive count."""
 
     def fake_read_text(self, *args, **kwargs):
         if self.as_posix() == "/sys/fs/cgroup/cpu.max":
@@ -218,9 +218,7 @@ async def test_run_algorithm_inline_when_no_executor():
 
 async def test_run_algorithm_uses_executor_and_semaphore(monkeypatch):
     """Executor branch: resolves via the registry inside the worker and runs."""
-    monkeypatch.setattr(
-        "algorithms.registry.registry.implementation", lambda name: _FakePoolAlgo
-    )
+    monkeypatch.setattr("algorithms.registry.registry.implementation", lambda name: _FakePoolAlgo)
     semaphore = asyncio.Semaphore(1)
     with ThreadPoolExecutor(max_workers=1) as ex:
         result = await dispatcher._run_algorithm(
@@ -237,9 +235,7 @@ def test_run_algorithm_subprocess_resolves_and_runs(monkeypatch):
     Sync test: ``_run_algorithm_subprocess`` calls ``asyncio.run`` internally,
     which must not be invoked from inside a running loop.
     """
-    monkeypatch.setattr(
-        "algorithms.registry.registry.implementation", lambda name: _FakePoolAlgo
-    )
+    monkeypatch.setattr("algorithms.registry.registry.implementation", lambda name: _FakePoolAlgo)
     result = dispatcher._run_algorithm_subprocess("pool_fake", _DummyInput(), _make_raw())
     assert isinstance(result, AlgorithmResult)
 
