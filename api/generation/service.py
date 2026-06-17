@@ -26,6 +26,7 @@ from core.api_response import Pagination
 from core.audit_log import AuditActions, AuditLogInput, AuditLogService
 from core.database.database import AsyncSessionCRMFactory, AsyncSessionLocalFactory
 from core.errors.errors import ErrorException
+from core.middleware.request_limits import UPLOAD_MAX_BODY_BYTES
 from core.queue.helper import Event, send_event
 from core.queue.init import get_jetstream
 from shared.const import GenerationStatus
@@ -34,6 +35,33 @@ from shared.custom_errors import errors
 from shared.models.local_models import GenerationModel
 
 logger = logging.getLogger(__name__)
+
+
+# Read the upload in bounded chunks instead of one unbounded ``file.read()``.
+_UPLOAD_READ_CHUNK_BYTES = 1024 * 1024  # 1 MB
+
+
+async def _read_within_cap(file: UploadFile, max_bytes: int) -> bytes:
+    """Read ``file`` fully into memory, aborting with 413 past ``max_bytes``.
+
+    RequestLimitsMiddleware rejects oversized uploads up front via the
+    Content-Length header, but a chunked request (Transfer-Encoding: chunked)
+    carries no Content-Length and slips past that gate — and the multipart
+    parser streams file parts to a disk-backed spool with no size cap. Reading
+    here in bounded chunks keeps peak memory at roughly ``max_bytes`` and
+    rejects the body before the whole thing is pulled into a single ``bytes``,
+    closing the memory-exhaustion bypass. A body of exactly ``max_bytes`` is
+    accepted; the first byte over is rejected.
+    """
+    buffer = bytearray()
+    while True:
+        chunk = await file.read(_UPLOAD_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        if len(buffer) + len(chunk) > max_bytes:
+            raise ErrorException(error=errors.generation.FILE_TOO_LARGE, status_code=413)
+        buffer.extend(chunk)
+    return bytes(buffer)
 
 
 class GenerationService:
@@ -104,8 +132,10 @@ class GenerationService:
             ) from e
 
         # 3. Read the upload body. Reject empty files so the worker doesn't
-        # waste a slot on a guaranteed parse failure.
-        content = await file.read()
+        # waste a slot on a guaranteed parse failure. The bounded read caps
+        # peak memory and rejects oversized chunked bodies that slip past
+        # RequestLimitsMiddleware's Content-Length gate.
+        content = await _read_within_cap(file, UPLOAD_MAX_BODY_BYTES)
         if not content:
             raise ErrorException(
                 error=errors.generation.INVALID_FILE,

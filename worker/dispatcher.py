@@ -32,17 +32,25 @@ after a successful ``_process`` return.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from concurrent.futures import BrokenExecutor, Executor
 
 from nats.aio.msg import Msg
 from nats.js import JetStreamContext
 from nats.js.api import ConsumerConfig
 from pydantic import ValidationError
 
-from algorithms.base import AlgorithmMetadata
+from algorithms.base import (
+    Algorithm,
+    AlgorithmInput,
+    AlgorithmMetadata,
+    AlgorithmRawData,
+    AlgorithmResult,
+)
 from algorithms.registry import registry
 from core import metrics as app_metrics
 from core import storage
@@ -95,79 +103,145 @@ class _Terminal:
 async def subscribe_algorithm(
     js: JetStreamContext,
     meta: AlgorithmMetadata,
+    *,
+    executor: Executor | None = None,
+    semaphore: asyncio.Semaphore | None = None,
+    inflight: set[asyncio.Task] | None = None,
+    max_ack_pending: int | None = None,
 ):
     """Subscribe the worker to a single algorithm's NATS subject.
 
     Returns the subscription so the caller can drain it on shutdown.
+
+    Concurrency wiring (all optional; defaults reproduce the original
+    single-threaded, inline behaviour used by unit tests):
+
+    * ``executor`` runs each solve in a separate process so a multi-minute
+      optimisation never blocks the event loop — which must stay free to
+      answer NATS PING/PONG and refresh the liveness heartbeat.
+    * ``semaphore`` caps how many solves run at once (sized to the pool).
+    * ``inflight`` collects the per-message background tasks so the caller
+      can await them on shutdown.
+    * ``max_ack_pending`` bounds how many messages JetStream delivers
+      unacked; set to the pool size so the broker never hands us more work
+      than we can actively solve. (JetStream upserts this on an existing
+      durable; a consumer created by an older build is updated in place.)
     """
-    handler = _make_handler(meta)
+    handler = _make_handler(meta, executor=executor, semaphore=semaphore, inflight=inflight)
+    config_kwargs: dict = {"ack_wait": _ACK_WAIT_SECONDS}
+    if max_ack_pending is not None:
+        config_kwargs["max_ack_pending"] = max_ack_pending
     sub = await js.subscribe(
         subject=meta.queue,
         durable=f"worker-{meta.name}",
         queue=f"worker-{meta.name}",
         manual_ack=True,
         cb=handler,
-        config=ConsumerConfig(ack_wait=_ACK_WAIT_SECONDS),
+        config=ConsumerConfig(**config_kwargs),
     )
     logger.info("Subscribed to %s (durable=worker-%s)", meta.queue, meta.name)
     return sub
 
 
-def _make_handler(meta: AlgorithmMetadata) -> Callable[[Msg], Awaitable[None]]:
+def _make_handler(
+    meta: AlgorithmMetadata,
+    *,
+    executor: Executor | None = None,
+    semaphore: asyncio.Semaphore | None = None,
+    inflight: set[asyncio.Task] | None = None,
+) -> Callable[[Msg], Awaitable[None]]:
     """Build the per-message callback for ``meta``.
 
     Closes over ``meta`` so each subscription has its own pre-bound
     handler with no global lookups on the hot path.
+
+    nats-py serialises a subscription's callback — it ``await``\\ s one
+    message before pulling the next. So to run several generations of the
+    *same* algorithm concurrently we spawn the work as a background task and
+    return immediately, letting the next message be delivered while this one
+    solves. ``inflight`` tracks those tasks for graceful drain on shutdown.
+
+    When ``inflight`` is None the message is handled inline to completion —
+    the shape unit tests rely on, and a safe single-threaded fallback.
     """
 
-    async def handle(msg: Msg) -> None:
-        try:
-            event = Event.decode(msg.data)
-        except Exception:
-            logger.exception("Failed to decode event on %s; acking and dropping", meta.queue)
-            await msg.ack()
-            app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "drop_decode"})
-            return
-
-        generation_id = event.data.get("generation_id") if isinstance(event.data, dict) else None
-        if not isinstance(generation_id, int):
+    def _on_task_done(task: asyncio.Task) -> None:
+        if inflight is not None:
+            inflight.discard(task)
+        if not task.cancelled() and task.exception() is not None:
             logger.error(
-                "Event on %s has missing/invalid generation_id: %r",
-                meta.queue,
-                event.data,
+                "Generation handler task for %s crashed: %r", meta.queue, task.exception()
             )
-            await msg.ack()
-            app_metrics.worker_messages.add(
-                1, {"algorithm": meta.name, "outcome": "drop_invalid_id"}
-            )
-            return
 
-        try:
-            outcome = await _process(meta, generation_id, msg)
-        except _TransientError as exc:
-            logger.warning(
-                "Transient failure for generation %d, will redeliver: %s",
-                generation_id,
-                exc,
-            )
-            await msg.nak(delay=_NAK_RETRY_DELAY_SECONDS)
-            app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "nak"})
+    async def handle(msg: Msg) -> None:
+        if inflight is None:
+            await _handle_message(meta, msg, executor=executor, semaphore=semaphore)
             return
-        except Exception:
-            # Catch-all so the subscription never dies. We treat unexpected
-            # errors as deterministic — better to mark the row FAILED with
-            # the traceback context than to redeliver indefinitely.
-            logger.exception("Unhandled error processing generation %d", generation_id)
-            await persistence.save_failure(generation_id, "unhandled_worker_error")
-            await msg.ack()
-            app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "ack_unhandled"})
-            return
-
-        await msg.ack()
-        if outcome.storage_key is not None:
-            await _delete_safely(outcome.storage_key)
+        task = asyncio.create_task(
+            _handle_message(meta, msg, executor=executor, semaphore=semaphore)
+        )
+        inflight.add(task)
+        task.add_done_callback(_on_task_done)
 
     return handle
+
+
+async def _handle_message(
+    meta: AlgorithmMetadata,
+    msg: Msg,
+    *,
+    executor: Executor | None = None,
+    semaphore: asyncio.Semaphore | None = None,
+) -> None:
+    """Decode one message, run the pipeline, and ack/nak per the failure matrix.
+
+    Always runs to completion when awaited. The spawning + concurrency
+    bounding live in ``_make_handler`` / ``_process``, so this stays a
+    straightforward, directly-testable unit.
+    """
+    try:
+        event = Event.decode(msg.data)
+    except Exception:
+        logger.exception("Failed to decode event on %s; acking and dropping", meta.queue)
+        await msg.ack()
+        app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "drop_decode"})
+        return
+
+    generation_id = event.data.get("generation_id") if isinstance(event.data, dict) else None
+    if not isinstance(generation_id, int):
+        logger.error(
+            "Event on %s has missing/invalid generation_id: %r",
+            meta.queue,
+            event.data,
+        )
+        await msg.ack()
+        app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "drop_invalid_id"})
+        return
+
+    try:
+        outcome = await _process(meta, generation_id, msg, executor=executor, semaphore=semaphore)
+    except _TransientError as exc:
+        logger.warning(
+            "Transient failure for generation %d, will redeliver: %s",
+            generation_id,
+            exc,
+        )
+        await msg.nak(delay=_NAK_RETRY_DELAY_SECONDS)
+        app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "nak"})
+        return
+    except Exception:
+        # Catch-all so the subscription never dies. We treat unexpected
+        # errors as deterministic — better to mark the row FAILED with
+        # the traceback context than to redeliver indefinitely.
+        logger.exception("Unhandled error processing generation %d", generation_id)
+        await persistence.save_failure(generation_id, "unhandled_worker_error")
+        await msg.ack()
+        app_metrics.worker_messages.add(1, {"algorithm": meta.name, "outcome": "ack_unhandled"})
+        return
+
+    await msg.ack()
+    if outcome.storage_key is not None:
+        await _delete_safely(outcome.storage_key)
 
 
 class _TransientError(Exception):
@@ -183,6 +257,9 @@ async def _process(
     meta: AlgorithmMetadata,
     generation_id: int,
     msg: Msg,
+    *,
+    executor: Executor | None = None,
+    semaphore: asyncio.Semaphore | None = None,
 ) -> _Terminal:
     """The pipeline for a single generation message.
 
@@ -253,7 +330,9 @@ async def _process(
 
     start = time.perf_counter()
     try:
-        result = await impl_cls().run(algo_input, raw_data)
+        result = await _run_algorithm(
+            meta.name, impl_cls, algo_input, raw_data, executor, semaphore
+        )
     except Exception as exc:
         # Record duration even for failures — the time-to-failure is a
         # useful signal for slow-failing algorithms (e.g. solver timeout).
@@ -282,6 +361,62 @@ async def _process(
 
     logger.info("Generation %d processed successfully", generation_id)
     return _Terminal(storage_key=snapshot.file_storage_key)
+
+
+async def _run_algorithm(
+    algo_name: str,
+    impl_cls: type[Algorithm],
+    algo_input: AlgorithmInput,
+    raw_data: AlgorithmRawData,
+    executor: Executor | None,
+    semaphore: asyncio.Semaphore | None,
+) -> AlgorithmResult:
+    """Execute the solve, off the event loop when a process pool is configured.
+
+    With ``executor`` set, the CPU-bound solve runs in a separate process so
+    the event loop stays responsive (NATS liveness + heartbeat) and several
+    solves can use several cores. ``semaphore`` caps how many run at once.
+    Without an executor (unit tests / single-process fallback) it runs
+    inline, preserving the original behaviour and the registry monkeypatch
+    seam the tests use.
+    """
+    if executor is None:
+        return await impl_cls().run(algo_input, raw_data)
+    loop = asyncio.get_running_loop()
+    try:
+        if semaphore is None:
+            return await loop.run_in_executor(
+                executor, _run_algorithm_subprocess, algo_name, algo_input, raw_data
+            )
+        async with semaphore:
+            return await loop.run_in_executor(
+                executor, _run_algorithm_subprocess, algo_name, algo_input, raw_data
+            )
+    except BrokenExecutor as exc:
+        # A pool worker died abnormally (OOM, native crash in the solver).
+        # Treat as transient — redeliver rather than wrongly mark this
+        # generation FAILED. The pool rebuilds itself on the next submit
+        # (see worker.main._SolverPool), so the redelivery lands on a fresh
+        # worker.
+        raise _TransientError(f"solver pool broken: {exc}") from exc
+
+
+def _run_algorithm_subprocess(
+    algo_name: str,
+    inputs: AlgorithmInput,
+    raw_data: AlgorithmRawData,
+) -> AlgorithmResult:
+    """Top-level, picklable entry executed inside a solver pool process.
+
+    The pool initializer (``worker.main._init_solver_process``) has already
+    run ``autodiscover(load_implementations=True)`` in this process, so the
+    implementation is registered here. ``run`` is declared async but does
+    pure CPU work with no real awaits, so a throwaway event loop drives it.
+    Inputs (pydantic), ``raw_data`` (numpy arrays + names) and the result
+    are all picklable, so they cross the process boundary cleanly.
+    """
+    impl_cls = registry.implementation(algo_name)
+    return asyncio.run(impl_cls().run(inputs, raw_data))
 
 
 async def _delete_safely(key: str) -> None:

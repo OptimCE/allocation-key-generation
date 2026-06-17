@@ -26,7 +26,8 @@
       "START_GENERATION": "Generatie kon niet worden gestart (code: 2011)",
       "INVALID_ALGORITHM_INPUTS": "Ongeldige algoritme-invoer (code: 2012)",
       "STORAGE_UPLOAD_FAILED": "Uploaden van het bronbestand is mislukt (code: 2013)",
-      "INVALID_FILE": "Ongeldig of leeg bestand (code: 2014)"
+      "INVALID_FILE": "Ongeldig of leeg bestand (code: 2014)",
+      "FILE_TOO_LARGE": "Het bestand overschrijdt de maximaal toegestane grootte (code: 2015)"
     }
   },
   "ALGORITHMS": {

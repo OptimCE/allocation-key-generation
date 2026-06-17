@@ -26,7 +26,8 @@
       "START_GENERATION": "Unable to start the generation (code: 2011)",
       "INVALID_ALGORITHM_INPUTS": "Invalid algorithm inputs (code: 2012)",
       "STORAGE_UPLOAD_FAILED": "Unable to upload the source file (code: 2013)",
-      "INVALID_FILE": "Invalid or empty file (code: 2014)"
+      "INVALID_FILE": "Invalid or empty file (code: 2014)",
+      "FILE_TOO_LARGE": "The file exceeds the maximum allowed size (code: 2015)"
     }
   },
   "ALGORITHMS": {

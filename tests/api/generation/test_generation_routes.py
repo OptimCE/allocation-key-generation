@@ -80,6 +80,52 @@ def _multipart_payload(
     }
 
 
+def _multipart_body(
+    boundary: str,
+    *,
+    name: str,
+    injection_name: str,
+    algorithm_name: str,
+    inputs: dict,
+    filename: str,
+    file_bytes: bytes,
+) -> bytes:
+    """Hand-build a raw multipart/form-data body for POST /generation/.
+
+    Returns raw bytes so the test can feed them to httpx via ``content=`` (an
+    async generator), which makes httpx send Transfer-Encoding: chunked with no
+    Content-Length — the exact shape RequestLimitsMiddleware cannot screen.
+    ``_multipart_payload`` can't be used here: its ``files=``/``data=`` kwargs
+    make httpx compute a Content-Length, which the middleware would catch first.
+    """
+    delim = f"--{boundary}".encode()
+
+    def _field(field_name: str, value: str) -> bytes:
+        return (
+            delim
+            + b"\r\n"
+            + f'Content-Disposition: form-data; name="{field_name}"\r\n\r\n'.encode()
+            + value.encode()
+            + b"\r\n"
+        )
+
+    return b"".join(
+        [
+            _field("name", name),
+            _field("injection_name", injection_name),
+            _field("algorithm_name", algorithm_name),
+            _field("inputs", json.dumps(inputs)),
+            delim
+            + b"\r\n"
+            + f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode()
+            + b"Content-Type: text/csv\r\n\r\n"
+            + file_bytes
+            + b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        ]
+    )
+
+
 async def _community_with_subscription(db_session) -> Community:
     """Generation routes are gated by `require_feature(ALGORITHM)`.
 
@@ -504,6 +550,57 @@ async def test_start_generation_empty_file_returns_422_and_skips_upload(
     assert response.json()["error_code"] == 2014  # INVALID_FILE
     mock_upload.assert_not_awaited()
     mock_delete.assert_not_awaited()
+
+
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
+async def test_start_generation_chunked_body_over_cap_returns_413(
+    mock_upload, monkeypatch, client, db_session
+):
+    """A chunked upload (no Content-Length) over the cap is rejected by the handler.
+
+    RequestLimitsMiddleware can only screen the Content-Length header, so a
+    chunked request slips past it; the handler's bounded read must catch it.
+    The cap is shrunk so the test body stays tiny. A valid algorithm/inputs is
+    sent so the request reaches the bounded read (algorithm + input validation
+    run first in start_generation).
+    """
+    community = await _community_with_subscription(db_session)
+
+    # Patch the binding the service actually reads (it imported the name).
+    monkeypatch.setattr("api.generation.service.UPLOAD_MAX_BODY_BYTES", 64)
+
+    boundary = "testboundaryDEADBEEF"
+    body = _multipart_body(
+        boundary,
+        name="big gen",
+        injection_name="production",
+        algorithm_name="brute_force",
+        inputs={"iterations": 2},  # valid → reaches the bounded read
+        filename="big.csv",
+        file_bytes=b"A" * 256,  # well over the 64-byte cap
+    )
+
+    async def _chunked_stream():
+        # Two yields => httpx uses Transfer-Encoding: chunked with no
+        # Content-Length, which is exactly the case the middleware can't screen.
+        mid = len(body) // 2
+        yield body[:mid]
+        yield body[mid:]
+
+    response = await client.post(
+        "/",
+        headers={
+            **_admin_headers(community),
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        content=_chunked_stream(),
+    )
+
+    assert response.status_code == 413
+    # error_code 2015 proves the HANDLER rejected it; the middleware path
+    # returns error_code 0.
+    assert response.json()["error_code"] == 2015  # FILE_TOO_LARGE
+    mock_upload.assert_not_awaited()  # rejected before the storage write
 
 
 # ---------------------------------------------------------------------------
