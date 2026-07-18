@@ -1,17 +1,5 @@
 [
   {
-    "name": "BILLING",
-    "subjects": ["billing.>"],
-    "retention": "work_queue",
-    "storage": "file"
-  },
-  {
-    "name": "NOTIFICATIONS",
-    "subjects": ["notifications.>"],
-    "retention": "work_queue",
-    "storage": "file"
-  },
-  {
     "name": "ALGORITHMS",
     "subjects": ["optimce.allocation.>"],
     "retention": "work_queue",

@@ -7,6 +7,7 @@ import nats
 from nats.aio.client import Client as NATSClient
 from nats.js import JetStreamContext
 from nats.js.api import RetentionPolicy, StorageType
+from nats.js.errors import APIError, BadRequestError
 
 from core.config import settings
 
@@ -72,6 +73,34 @@ async def _on_closed() -> None:
     logger.warning("NATS connection closed; no further reconnect attempts will be made")
 
 
+async def _ensure_stream(js: JetStreamContext, stream: dict) -> None:
+    """Create a stream, or reconcile a mutable-config drift to the declared config.
+
+    JetStream's ``add_stream`` is NOT idempotent when a stream with the same name
+    already exists with a *different* configuration (err 10058) — it raises. We
+    reconcile to the declared config via ``update_stream`` (which accepts mutable
+    changes such as subjects and limits). An immutable mismatch (retention or
+    storage type) cannot be changed in place, so we surface a clear, actionable
+    error instead of an opaque boot crash.
+    """
+    try:
+        await js.add_stream(**stream)
+        return
+    except BadRequestError as exc:
+        if exc.err_code != 10058:  # 10058 = stream name in use with a different config
+            raise
+    try:
+        await js.update_stream(**stream)
+    except APIError as exc:
+        raise RuntimeError(
+            f"JetStream stream {stream['name']!r} already exists with an incompatible "
+            f"configuration that cannot be changed in place (likely a different "
+            f"retention/storage). Delete it and let it be recreated, e.g. "
+            f"`nats stream rm {stream['name']}`. Cause: {exc}"
+        ) from exc
+    logger.warning("Reconciled JetStream stream %s to the declared configuration", stream["name"])
+
+
 async def init_nats() -> None:
     """Connect to NATS, build JetStream, and ensure required streams exist.
 
@@ -94,7 +123,7 @@ async def init_nats() -> None:
     _jetstream = _nats_client.jetstream()
 
     for stream in _load_streams():
-        await _jetstream.add_stream(**stream)
+        await _ensure_stream(_jetstream, stream)
 
 
 async def close_nats() -> None:
