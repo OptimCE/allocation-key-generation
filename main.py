@@ -1,10 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from starlette.middleware.cors import CORSMiddleware
-
 from algorithms import autodiscover
 from api.generation.routes import generation_routes
 from api.health.routes import health_router
@@ -17,7 +13,11 @@ from core.middleware.locale_middleware import LocaleMiddleware
 from core.middleware.request_limits import RequestLimitsMiddleware
 from core.middleware.set_auth_context import GatewayScopeMiddleware
 from core.queue.init import close_nats, init_nats
+from core.realtime import log_realtime_state
 from core.tracing import enrich_span, setup_tracer_provider
+from fastapi import Depends, FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from starlette.middleware.cors import CORSMiddleware
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Absence of this line means the image predates the realtime feature —
+    # see core/realtime/bus.py. Must come after configure_logging().
+    log_realtime_state("allocation-key-generation api")
     setup_tracer_provider()
     await init_nats()
     autodiscover()
