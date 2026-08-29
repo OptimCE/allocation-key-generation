@@ -2,13 +2,14 @@
 
 Usage: python scripts/export_openapi.py <output_path>
 """
+
 import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from main import app  # noqa: E402
+from main import app
 
 
 def export(output_path: Path) -> None:

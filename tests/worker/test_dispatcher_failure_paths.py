@@ -40,7 +40,7 @@ from algorithms.base import (
     AlgorithmResult,
 )
 from core.queue.helper import Event
-from shared.const import GenerationStatus
+from shared.const import DataSource, GenerationStatus
 from worker import dispatcher
 
 # ---------------------------------------------------------------------------
@@ -102,9 +102,13 @@ def _make_snapshot(
 ) -> dispatcher._GenerationSnapshot:
     return dispatcher._GenerationSnapshot(
         id=generation_id,
+        source=DataSource.FILE,
         file_storage_key=file_storage_key,
         file_name="data.csv",
         injection_name="production",
+        id_sharing_operation=None,
+        period_start=None,
+        period_end=None,
         inputs=inputs if inputs is not None else {"value": 1},
         id_community=1,
         status=int(status),
@@ -227,7 +231,7 @@ async def test_handler_calls_save_failure_when_algorithm_raises(
     monkeypatch.setattr(
         dispatcher,
         "_snapshot_generation",
-        AsyncMock(return_value=_make_snapshot()),
+        AsyncMock(return_value=_make_snapshot(generation_id=42)),
     )
     monkeypatch.setattr(
         "algorithms.registry.registry.implementation",
@@ -262,7 +266,7 @@ async def test_handler_calls_save_failure_when_implementation_missing(
     monkeypatch.setattr(
         dispatcher,
         "_snapshot_generation",
-        AsyncMock(return_value=_make_snapshot()),
+        AsyncMock(return_value=_make_snapshot(generation_id=7)),
     )
 
     def _missing(_name):
@@ -332,7 +336,7 @@ async def test_handler_naks_when_save_success_raises_db_error(
     monkeypatch.setattr(
         dispatcher,
         "_snapshot_generation",
-        AsyncMock(return_value=_make_snapshot()),
+        AsyncMock(return_value=_make_snapshot(generation_id=99)),
     )
     monkeypatch.setattr(
         "algorithms.registry.registry.implementation",
@@ -396,7 +400,7 @@ async def test_handler_deletes_object_on_success(
     monkeypatch.setattr(
         dispatcher,
         "_snapshot_generation",
-        AsyncMock(return_value=_make_snapshot()),
+        AsyncMock(return_value=_make_snapshot(generation_id=33)),
     )
     monkeypatch.setattr(
         "algorithms.registry.registry.implementation",
@@ -430,7 +434,7 @@ async def test_handler_marks_failed_when_storage_object_missing(
     monkeypatch.setattr(
         dispatcher,
         "_snapshot_generation",
-        AsyncMock(return_value=_make_snapshot()),
+        AsyncMock(return_value=_make_snapshot(generation_id=44)),
     )
 
     handler = dispatcher._make_handler(_make_meta())
@@ -461,7 +465,7 @@ async def test_handler_naks_on_storage_transient_error(monkeypatch, patched_save
     monkeypatch.setattr(
         dispatcher,
         "_snapshot_generation",
-        AsyncMock(return_value=_make_snapshot()),
+        AsyncMock(return_value=_make_snapshot(generation_id=77)),
     )
 
     handler = dispatcher._make_handler(_make_meta())

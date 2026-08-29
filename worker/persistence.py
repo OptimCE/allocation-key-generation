@@ -32,6 +32,7 @@ from algorithms.base import AlgorithmResult
 from core import metrics as app_metrics
 from core.audit_log import AuditActions, AuditLogInput, AuditLogService
 from core.database.database import AsyncSessionCRMFactory, AsyncSessionLocalFactory
+from core.realtime import CommunityAudience, Tier, emit
 from shared.const import GenerationStatus
 from shared.models.local_models import (
     AllocationKeyGeneratedModel,
@@ -139,6 +140,26 @@ async def save_success(generation_id: int, result: AlgorithmResult) -> None:
         )
         await crm_session.commit()
 
+    # Realtime hint, AFTER both commits. Fire-and-forget: if no manager has the
+    # hub open it is dropped, which is correct — the row is already durable and
+    # the hub's own poller converges regardless.
+    #
+    # Audience is the community's MANAGER tier, not a user: `generation` carries
+    # only `id_community`, and the hub route is manager-gated anyway
+    # (annexes-services.routes.ts, minRole GESTIONNAIRE). That is the whole point
+    # of the community channel family — a worker with no request context and no
+    # user attribution addresses exactly the right people with zero lookups.
+    #
+    # No error message and no key count in the envelope: it is a hint, and the
+    # client refetches through the gateway (which re-authorizes the read).
+    await emit(
+        topic="generation.finished",
+        audience=CommunityAudience(community_id=community_id, tier=Tier.MANAGER),
+        resource=("generation", generation_id),
+        scope_community_id=community_id,
+        hint={"status": "success"},
+    )
+
 
 async def save_failure(generation_id: int, error_message: str) -> None:
     """Mark a generation FAILED with the given message.
@@ -194,3 +215,14 @@ async def save_failure(generation_id: int, error_message: str) -> None:
             id_community=id_community,
         )
         await crm_session.commit()
+
+    # Same contract as save_success. `id_community` was captured before the
+    # session closed; both factories set expire_on_commit=False, so reading it
+    # here does not re-issue a query against a closed session.
+    await emit(
+        topic="generation.finished",
+        audience=CommunityAudience(community_id=id_community, tier=Tier.MANAGER),
+        resource=("generation", generation_id),
+        scope_community_id=id_community,
+        hint={"status": "failed"},
+    )
