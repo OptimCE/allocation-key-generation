@@ -38,15 +38,18 @@ logger = logging.getLogger(__name__)
 # 2 MB — generous for a JSON API, covers PDF upload metadata but blocks abuse
 MAX_BODY_BYTES = 2 * 1024 * 1024
 
-# Larger cap for explicit upload endpoints (POST /generation/ multipart).
+# Larger cap for explicit upload endpoints (the generation multipart upload).
 # 50 MB covers realistic energy datasets (hourly * 365 days * hundreds of
 # consumers) loaded fully into memory in the route handler. Bump this only
 # after moving the upload to a streaming put_object.
 UPLOAD_MAX_BODY_BYTES = 50 * 1024 * 1024
 
-# Path + method pairs that get the larger upload cap. Match on POST only —
-# GET/DELETE on the same path keep the default.
-_UPLOAD_ROUTES: tuple[tuple[str, str], ...] = (("POST", "/generation/"),)
+# Path + method pairs that get the larger upload cap. These are matched against
+# the path THIS APP sees, not the public gateway path: the generation upload is
+# POST / here (generation_routes is mounted without a prefix in main.py, and the
+# /generation prefix is added by KrakenD). Match on POST only — GET/DELETE on
+# the same path keep the default.
+_UPLOAD_ROUTES: tuple[tuple[str, str], ...] = (("POST", "/"),)
 
 # 30 seconds — covers complex DB queries / PDF generation
 TIMEOUT_SECONDS = 30

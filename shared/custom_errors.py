@@ -33,6 +33,23 @@ class _GenerationErrors:
     INVALID_FILE = Error(code=2014, key="ERRORS.GENERATION.INVALID_FILE")
     FILE_TOO_LARGE = Error(code=2015, key="ERRORS.GENERATION.FILE_TOO_LARGE")
 
+    # --- CRM-sourced input (source = DataSource.CRM) -----------------------
+    # Raised before a run is queued (pre-flight on POST /from-crm) and again
+    # in the worker, which re-reads the data at execution time.
+    INVALID_PERIOD = Error(code=2016, key="ERRORS.GENERATION.INVALID_PERIOD")
+    SHARING_OPERATION_NOT_FOUND = Error(
+        code=2017, key="ERRORS.GENERATION.SHARING_OPERATION_NOT_FOUND"
+    )
+    CRM_NO_DATA = Error(code=2018, key="ERRORS.GENERATION.CRM_NO_DATA")
+    # No unique constraint on meter_consumption(ean, timestamp): a repeated
+    # import silently doubles a participant's energy, so this is fatal rather
+    # than a warning.
+    CRM_DUPLICATE_READINGS = Error(code=2019, key="ERRORS.GENERATION.CRM_DUPLICATE_READINGS")
+    CRM_NO_INJECTION = Error(code=2020, key="ERRORS.GENERATION.CRM_NO_INJECTION")
+    CRM_NO_CONSUMERS = Error(code=2021, key="ERRORS.GENERATION.CRM_NO_CONSUMERS")
+    CRM_RANGE_TOO_LARGE = Error(code=2022, key="ERRORS.GENERATION.CRM_RANGE_TOO_LARGE")
+    GET_CRM_PREVIEW = Error(code=2023, key="ERRORS.GENERATION.GET_CRM_PREVIEW")
+
 
 class _Errors:
     auth = _AuthErrors()

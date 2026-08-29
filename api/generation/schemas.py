@@ -1,3 +1,4 @@
+import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -102,3 +103,66 @@ class LocalizedAlgorithmMetadata(BaseModel):
     input_schema: dict[str, Any]
     tags: list[str]
     timeout_seconds: int | None
+
+
+# ---------------------------------------------------------------------------
+# CRM-sourced generation (source = DataSource.CRM)
+# ---------------------------------------------------------------------------
+
+
+class GenerateFromCrmRequest(BaseModel):
+    """Body of ``POST /from-crm``.
+
+    Unlike ``GenerateRequest`` this *is* the FastAPI body model: with no file
+    part there is nothing forcing multipart, so the request is plain JSON.
+
+    ``injection_name`` is deliberately absent — the production profile is summed
+    from the meters themselves, which is the whole reason this path is simpler
+    for the user than uploading a file.
+    """
+
+    name: str = Field(..., min_length=1, description="User-facing label for the generation.")
+    algorithm_name: str = Field(..., description="Algorithm registry key, e.g. 'olagsa'.")
+    inputs: dict[str, Any] = Field(
+        ...,
+        description=(
+            "Algorithm-specific input parameters; validated against the algorithm's input schema."
+        ),
+    )
+    id_sharing_operation: int = Field(..., description="CRM sharing operation to read meters from.")
+    period_start: datetime.date = Field(..., description="First day of the period (inclusive).")
+    period_end: datetime.date = Field(..., description="Last day of the period (inclusive).")
+
+
+class IncompleteMeter(BaseModel):
+    """A meter missing part of the period. Zero-filled, not fatal."""
+
+    ean: str
+    readings: int = Field(..., description="Distinct timestamps this meter actually has.")
+    expected: int = Field(..., description="Distinct timestamps across the whole operation.")
+    missing: int = Field(..., description="expected - readings.")
+
+
+class PreviewBlocker(BaseModel):
+    """A reason the period cannot be used, already localised."""
+
+    error_code: int = Field(..., description="Matches the error_code of the eventual 4xx.")
+    message: str = Field(..., description="Localised, manager-facing explanation.")
+    detail: str = Field(..., description="Which meters/values triggered it.")
+
+
+class CrmDataPreview(BaseModel):
+    """What ``GET /crm-data-preview`` shows before the manager commits to a run.
+
+    ``can_generate`` is the single flag the UI binds its submit button to.
+    """
+
+    can_generate: bool
+    meter_count: int = Field(..., description="Meters that drew energy and will be participants.")
+    reading_count: int
+    first_timestamp: datetime.datetime | None
+    last_timestamp: datetime.datetime | None
+    total_consumption_kwh: float
+    total_injection_kwh: float
+    incomplete_meters: list[IncompleteMeter]
+    blockers: list[PreviewBlocker]

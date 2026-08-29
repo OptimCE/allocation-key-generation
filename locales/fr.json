@@ -27,7 +27,15 @@
       "INVALID_ALGORITHM_INPUTS": "Entrées d'algorithme invalides (code: 2012)",
       "STORAGE_UPLOAD_FAILED": "Impossible d'envoyer le fichier source (code: 2013)",
       "INVALID_FILE": "Fichier invalide ou vide (code: 2014)",
-      "FILE_TOO_LARGE": "Le fichier dépasse la taille maximale autorisée (code: 2015)"
+      "FILE_TOO_LARGE": "Le fichier dépasse la taille maximale autorisée (code: 2015)",
+      "INVALID_PERIOD": "La date de début doit précéder la date de fin (code: 2016)",
+      "SHARING_OPERATION_NOT_FOUND": "Opération de partage introuvable (code: 2017)",
+      "CRM_NO_DATA": "Aucune donnée de comptage pour cette opération de partage sur cette période (code: 2018)",
+      "CRM_DUPLICATE_READINGS": "Des relevés en double ont été détectés : les données ont probablement été importées deux fois (code: 2019)",
+      "CRM_NO_INJECTION": "Aucune injection sur cette période : il n'y a rien à partager (code: 2020)",
+      "CRM_NO_CONSUMERS": "Aucun compteur n'a consommé d'énergie sur cette période (code: 2021)",
+      "CRM_RANGE_TOO_LARGE": "La période sélectionnée contient trop de relevés, veuillez la raccourcir (code: 2022)",
+      "GET_CRM_PREVIEW": "Impossible de vérifier les données de comptage (code: 2023)"
     }
   },
   "ALGORITHMS": {

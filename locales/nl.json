@@ -27,7 +27,15 @@
       "INVALID_ALGORITHM_INPUTS": "Ongeldige algoritme-invoer (code: 2012)",
       "STORAGE_UPLOAD_FAILED": "Uploaden van het bronbestand is mislukt (code: 2013)",
       "INVALID_FILE": "Ongeldig of leeg bestand (code: 2014)",
-      "FILE_TOO_LARGE": "Het bestand overschrijdt de maximaal toegestane grootte (code: 2015)"
+      "FILE_TOO_LARGE": "Het bestand overschrijdt de maximaal toegestane grootte (code: 2015)",
+      "INVALID_PERIOD": "De begindatum moet op of vóór de einddatum liggen (code: 2016)",
+      "SHARING_OPERATION_NOT_FOUND": "Deeloperatie niet gevonden (code: 2017)",
+      "CRM_NO_DATA": "Geen meetgegevens voor deze deeloperatie in deze periode (code: 2018)",
+      "CRM_DUPLICATE_READINGS": "Dubbele meetwaarden gevonden: de gegevens zijn waarschijnlijk twee keer geïmporteerd (code: 2019)",
+      "CRM_NO_INJECTION": "Er is in deze periode niets geïnjecteerd, dus er valt niets te delen (code: 2020)",
+      "CRM_NO_CONSUMERS": "Geen enkele meter heeft in deze periode energie afgenomen (code: 2021)",
+      "CRM_RANGE_TOO_LARGE": "De geselecteerde periode bevat te veel meetwaarden, kies een kortere periode (code: 2022)",
+      "GET_CRM_PREVIEW": "De meetgegevens konden niet worden gecontroleerd (code: 2023)"
     }
   },
   "ALGORITHMS": {

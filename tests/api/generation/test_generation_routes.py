@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy import select
 
 from core.database.models import Community
+from core.middleware.request_limits import MAX_BODY_BYTES, UPLOAD_MAX_BODY_BYTES
 from shared.const import GenerationStatus
 from shared.models.crm_models import (
     AllocationKeyModel,
@@ -601,6 +602,51 @@ async def test_start_generation_chunked_body_over_cap_returns_413(
     # returns error_code 0.
     assert response.json()["error_code"] == 2015  # FILE_TOO_LARGE
     mock_upload.assert_not_awaited()  # rejected before the storage write
+
+
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
+@patch("api.generation.service.get_jetstream", return_value=MagicMock())
+@patch("api.generation.service.send_event", new_callable=AsyncMock)
+async def test_start_generation_large_body_with_content_length_is_accepted(
+    mock_send, mock_jetstream, mock_upload, mock_delete, client, db_session
+):
+    """A declared-length upload between the default and upload caps must pass.
+
+    Regression test. RequestLimitsMiddleware grants the larger
+    UPLOAD_MAX_BODY_BYTES only to the method/path pairs in `_UPLOAD_ROUTES`,
+    matched against the path THIS APP sees. That entry once read
+    ``("POST", "/generation/")`` — the public KrakenD path — but
+    generation_routes is mounted with no prefix, so the upload arrives as
+    ``POST /``, never matched, and every real upload over 2 MB was rejected by
+    the middleware with 413 / error_code 0.
+
+    Unlike the chunked test above, this body carries a Content-Length, which is
+    the *only* thing the middleware gate looks at — so this is the path a real
+    browser upload takes, and the one that was broken.
+    """
+    community = await _community_with_subscription(db_session)
+
+    # Over MAX_BODY_BYTES (2 MB), under UPLOAD_MAX_BODY_BYTES (50 MB). Sent via
+    # files=/data= so httpx computes a real Content-Length. The route never
+    # parses the file — it uploads the bytes and publishes — so filler is fine.
+    file_bytes = b"col1,col2,production\n" + b"1,2,3\n" * 400_000
+    assert MAX_BODY_BYTES < len(file_bytes) < UPLOAD_MAX_BODY_BYTES
+
+    response = await client.post(
+        "/",
+        headers=_admin_headers(community),
+        **_multipart_payload(
+            name="large upload",
+            file=("large.csv", file_bytes, "text/csv"),
+        ),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["error_code"] == 0
+    # Reaching the storage write proves the middleware gate let the body past.
+    mock_upload.assert_awaited_once()
+    assert mock_upload.await_args.args[1] == file_bytes
 
 
 # ---------------------------------------------------------------------------

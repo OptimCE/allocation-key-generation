@@ -1,12 +1,16 @@
 import json
+from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, File, Form, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from algorithms.registry import AlgorithmMetadata, registry
+from api.generation.mappers import to_crm_data_preview
 from api.generation.schemas import (
     AllocationKeyGenerated,
+    CrmDataPreview,
+    GenerateFromCrmRequest,
     GenerateRequest,
     GenerateResponse,
     Generation,
@@ -95,6 +99,34 @@ async def get_algorithm_inputs(algorithm_name: str):
     return ApiResponse[LocalizedAlgorithmMetadata](data=data)
 
 
+# GET (/crm-data-preview) : What the CRM holds for a sharing operation + period
+#
+# Declared BEFORE `GET /{id}`: FastAPI matches in declaration order, so putting
+# this after the integer catch-all would make "/crm-data-preview" try to parse
+# as an id and 422.
+@generation_routes.get("/crm-data-preview", response_model=ApiResponse[CrmDataPreview])
+@with_default_error(default_error=errors.generation.GET_CRM_PREVIEW)
+async def get_crm_data_preview(
+    local_session: Annotated[AsyncSession, Depends(get_local_session)],
+    crm_session: Annotated[AsyncSession, Depends(get_crm_session)],
+    id_sharing_operation: Annotated[int, Query(description="CRM sharing operation id.")],
+    period_start: Annotated[date, Query(description="First day of the period (inclusive).")],
+    period_end: Annotated[date, Query(description="Last day of the period (inclusive).")],
+):
+    internal_community_id = current_internal_community_id.get()
+    if internal_community_id is None:
+        raise ErrorException(error=errors.auth.UNAUTHORIZED, status_code=401)
+    service = GenerationService(local_session, crm_session)
+    preflight = await service.preview_crm_data(
+        id_sharing_operation=id_sharing_operation,
+        period_start=period_start,
+        period_end=period_end,
+        community_id=internal_community_id,
+    )
+    locale = current_locale.get().split("_")[0]
+    return ApiResponse[CrmDataPreview](data=to_crm_data_preview(preflight, locale))
+
+
 # GET (/key/{id}) : Key generated
 @generation_routes.get("/key/{id_key}", response_model=ApiResponse[AllocationKeyGenerated])
 @with_default_error(default_error=errors.generation.GET_ALLOCATION_KEY)
@@ -169,6 +201,25 @@ async def start_generation(
         raise ErrorException(error=errors.auth.UNAUTHORIZED, status_code=401)
     service = GenerationService(local_session, crm_session)
     data = await service.start_generation(req, file, internal_community_id)
+    return ApiResponse[GenerateResponse](data=data)
+
+
+# POST (/from-crm) Generate from CRM meter data
+#
+# Plain JSON, unlike POST / — with no file part nothing forces multipart. It
+# also correctly keeps the default 2 MB body cap rather than the upload one.
+@generation_routes.post("/from-crm", response_model=ApiResponse[GenerateResponse])
+@with_default_error(default_error=errors.generation.START_GENERATION)
+async def start_generation_from_crm(
+    body: Annotated[GenerateFromCrmRequest, Body()],
+    local_session: Annotated[AsyncSession, Depends(get_local_session)],
+    crm_session: Annotated[AsyncSession, Depends(get_crm_session)],
+):
+    internal_community_id = current_internal_community_id.get()
+    if internal_community_id is None:
+        raise ErrorException(error=errors.auth.UNAUTHORIZED, status_code=401)
+    service = GenerationService(local_session, crm_session)
+    data = await service.start_generation_from_crm(body, internal_community_id)
     return ApiResponse[GenerateResponse](data=data)
 
 

@@ -1,3 +1,4 @@
+import datetime
 import logging
 from uuid import uuid4
 
@@ -14,6 +15,7 @@ from api.generation.mappers import (
 from api.generation.repository import GenerationRepository
 from api.generation.schemas import (
     AllocationKeyGenerated,
+    GenerateFromCrmRequest,
     GenerateRequest,
     GenerateResponse,
     Generation,
@@ -29,7 +31,10 @@ from core.errors.errors import ErrorException
 from core.middleware.request_limits import UPLOAD_MAX_BODY_BYTES
 from core.queue.helper import Event, send_event
 from core.queue.init import get_jetstream
-from shared.const import GenerationStatus
+from shared import crm_preflight
+from shared.const import DataSource, GenerationStatus
+from shared.crm_meter_repository import CrmMeterRepository
+from shared.crm_preflight import Preflight
 from shared.crm_repository import CRMRepository
 from shared.custom_errors import errors
 from shared.models.local_models import GenerationModel
@@ -254,6 +259,128 @@ class GenerationService:
                 id_community=id_community,
             )
             await crm_session.commit()
+
+    # ------------------------------------------------------------------
+    # CRM-sourced generation
+    # ------------------------------------------------------------------
+
+    async def preview_crm_data(
+        self,
+        *,
+        id_sharing_operation: int,
+        period_start: datetime.date,
+        period_end: datetime.date,
+        community_id: int,
+    ) -> Preflight:
+        """Aggregate the requested period and classify it, without running anything.
+
+        Also the pre-flight for ``start_generation_from_crm`` — one code path, so
+        the answer the manager saw and the answer that gates the run cannot drift.
+        """
+        if period_start > period_end:
+            raise ErrorException(error=errors.generation.INVALID_PERIOD, status_code=422)
+
+        crm_meters = CrmMeterRepository(self.crm_session)
+        # Explicit tenant check: without it a foreign operation id is
+        # indistinguishable from an empty period, which is a confusing 422 for a
+        # legitimate user and a soft information leak for everyone else.
+        if not await crm_meters.sharing_operation_exists(
+            id_community=community_id, id_sharing_operation=id_sharing_operation
+        ):
+            raise ErrorException(
+                error=errors.generation.SHARING_OPERATION_NOT_FOUND, status_code=404
+            )
+
+        summary = await crm_meters.summarize(
+            id_community=community_id,
+            id_sharing_operation=id_sharing_operation,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        return crm_preflight.evaluate(summary)
+
+    async def start_generation_from_crm(
+        self, req: GenerateFromCrmRequest, community_id: int
+    ) -> GenerateResponse:
+        """Queue a generation that reads its input from the CRM.
+
+        Same ordering as the file path minus the upload: validate, commit, then
+        publish. There is no object to roll back, so the ``_best_effort_delete``
+        branches have no counterpart here.
+        """
+        if req.algorithm_name not in registry:
+            raise ErrorException(error=errors.generation.ALGORITHM_NOT_FOUND, status_code=404)
+        meta = registry.metadata(req.algorithm_name)
+
+        try:
+            validated_inputs = meta.input_schema.model_validate(req.inputs)
+        except ValidationError as e:
+            logger.info("Invalid inputs for algorithm '%s': %s", req.algorithm_name, e)
+            raise ErrorException(
+                error=errors.generation.INVALID_ALGORITHM_INPUTS, status_code=422
+            ) from e
+
+        # Re-run the pre-flight rather than trusting whatever the client saw:
+        # the preview may be minutes old, and an import can have landed since.
+        preflight = await self.preview_crm_data(
+            id_sharing_operation=req.id_sharing_operation,
+            period_start=req.period_start,
+            period_end=req.period_end,
+            community_id=community_id,
+        )
+        if preflight.blockers:
+            first = preflight.blockers[0]
+            logger.info(
+                "CRM generation refused for community %d op %d: %s",
+                community_id,
+                req.id_sharing_operation,
+                first.detail,
+            )
+            raise ErrorException(error=first.error, status_code=422)
+
+        model = GenerationModel(
+            name=req.name,
+            id_community=community_id,
+            source=DataSource.CRM,
+            id_sharing_operation=req.id_sharing_operation,
+            period_start=req.period_start,
+            period_end=req.period_end,
+            algorithm_name=meta.name,
+            algorithm_version=meta.version,
+            inputs=validated_inputs.model_dump(mode="json"),
+            status=GenerationStatus.PENDING,
+            data_warnings=preflight.warnings,
+        )
+        await self.repository.create_generation(model)
+        await self.local_session.commit()
+        generation_id = model.id
+        app_metrics.generations_created.add(1, {"algorithm": meta.name})
+        await self.audit_log_service.log(
+            AuditLogInput(
+                action=AuditActions.GENERATION_CREATED,
+                entity_type="generation",
+                entity_id=str(generation_id),
+                payload={
+                    "name": req.name,
+                    "algorithm_name": meta.name,
+                    "algorithm_version": meta.version,
+                    "source": DataSource.CRM.name,
+                    "id_sharing_operation": req.id_sharing_operation,
+                    "period_start": req.period_start.isoformat(),
+                    "period_end": req.period_end.isoformat(),
+                },
+            )
+        )
+
+        event = Event(type="generation.requested", data={"generation_id": generation_id})
+        try:
+            await send_event(get_jetstream(), meta.queue, event)
+        except Exception as exc:
+            logger.exception("Failed to publish generation %d to %s", generation_id, meta.queue)
+            await self._mark_failed_to_queue(generation_id, str(exc))
+            raise ErrorException(error=errors.generation.START_GENERATION, status_code=500) from exc
+
+        return GenerateResponse(id=generation_id, status=GenerationStatus.PENDING)
 
     async def save_key(self, saved_key: SaveKey):
         # Retrieve it in this database

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import datetime
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -54,10 +55,11 @@ from algorithms.base import (
 from algorithms.registry import registry
 from core import metrics as app_metrics
 from core import storage
-from core.database.database import AsyncSessionLocalFactory
+from core.database.database import AsyncSessionCRMFactory, AsyncSessionLocalFactory
 from core.queue.helper import Event
-from shared import data_loading
-from shared.const import GenerationStatus
+from shared import crm_preflight, crm_timeseries, data_loading
+from shared.const import DataSource, GenerationStatus
+from shared.crm_meter_repository import CrmMeterRepository
 from shared.models.local_models import GenerationModel
 from worker import persistence
 
@@ -79,9 +81,15 @@ class _GenerationSnapshot:
     """Per-message snapshot of the row, captured before the session closes."""
 
     id: int
-    file_storage_key: str
-    file_name: str
-    injection_name: str
+    source: DataSource
+    # FILE only — None on a CRM-sourced row.
+    file_storage_key: str | None
+    file_name: str | None
+    injection_name: str | None
+    # CRM only — None on a file-sourced row.
+    id_sharing_operation: int | None
+    period_start: datetime.date | None
+    period_end: datetime.date | None
     inputs: dict
     id_community: int
     status: int
@@ -282,30 +290,17 @@ async def _process(
         )
         return _Terminal(storage_key=snapshot.file_storage_key)
 
-    # ---- Step 2: download the source file ------------------------------
-    try:
-        content = await storage.download(snapshot.file_storage_key)
-    except storage.ObjectNotFound:
-        # The object is gone — possibly a previous run cleaned it up but
-        # the row was somehow still PENDING (admin intervention, partial
-        # crash). Terminal: mark FAILED and ack. Nothing left to delete.
-        await persistence.save_failure(generation_id, "storage_object_missing")
-        return _Terminal(storage_key=None)
-    except storage.TransientStorageError as exc:
-        raise _TransientError(f"storage download: {exc}") from exc
-
-    # ---- Step 3: parse the file into the algorithm raw-data triple -----
-    try:
-        raw_data = data_loading.load(content, snapshot.file_name, snapshot.injection_name)
-    except (
-        data_loading.InvalidInjectionColumnError,
-        data_loading.UnsupportedFileFormatError,
-    ) as exc:
-        await persistence.save_failure(generation_id, f"parse_failed: {exc}")
-        return _Terminal(storage_key=snapshot.file_storage_key)
-    except Exception as exc:
-        await persistence.save_failure(generation_id, f"parse_failed_unexpected: {exc}")
-        return _Terminal(storage_key=snapshot.file_storage_key)
+    # ---- Steps 2+3: obtain the algorithm raw-data triple ---------------
+    # Two sources, one output. FILE downloads and parses the upload; CRM reads
+    # meter_consumption and pivots it into the same wide frame. Everything
+    # downstream of here is identical and knows nothing about the source.
+    if snapshot.source is DataSource.CRM:
+        loaded = await _load_from_crm(snapshot)
+    else:
+        loaded = await _load_from_file(snapshot)
+    if isinstance(loaded, _Terminal):
+        return loaded
+    raw_data = loaded
 
     # ---- Step 4: re-validate inputs against the algorithm schema -------
     # Defensive: the API validates these on creation, but a row written
@@ -426,6 +421,106 @@ async def _delete_safely(key: str) -> None:
     await storage.delete(key)
 
 
+async def _load_from_file(
+    snapshot: _GenerationSnapshot,
+) -> AlgorithmRawData | _Terminal:
+    """Download the uploaded object and parse it. The historical path."""
+    if snapshot.file_storage_key is None or snapshot.file_name is None:
+        # Unreachable through the API (ck_generation_source enforces it), but a
+        # row written directly to the DB could get here. Same defensiveness as
+        # the inputs re-validation below.
+        await persistence.save_failure(snapshot.id, "file_source_incomplete")
+        return _Terminal(storage_key=None)
+
+    try:
+        content = await storage.download(snapshot.file_storage_key)
+    except storage.ObjectNotFound:
+        # The object is gone — possibly a previous run cleaned it up but
+        # the row was somehow still PENDING (admin intervention, partial
+        # crash). Terminal: mark FAILED and ack. Nothing left to delete.
+        await persistence.save_failure(snapshot.id, "storage_object_missing")
+        return _Terminal(storage_key=None)
+    except storage.TransientStorageError as exc:
+        raise _TransientError(f"storage download: {exc}") from exc
+
+    try:
+        return data_loading.load(content, snapshot.file_name, snapshot.injection_name or "")
+    except (
+        data_loading.InvalidInjectionColumnError,
+        data_loading.UnsupportedFileFormatError,
+    ) as exc:
+        await persistence.save_failure(snapshot.id, f"parse_failed: {exc}")
+        return _Terminal(storage_key=snapshot.file_storage_key)
+    except Exception as exc:
+        await persistence.save_failure(snapshot.id, f"parse_failed_unexpected: {exc}")
+        return _Terminal(storage_key=snapshot.file_storage_key)
+
+
+async def _load_from_crm(
+    snapshot: _GenerationSnapshot,
+) -> AlgorithmRawData | _Terminal:
+    """Read meter_consumption for this row's sharing operation and period.
+
+    The pre-flight is re-run here rather than trusted from creation time: the
+    data can have changed since the run was queued, and this is the read that
+    actually feeds the algorithm.
+
+    Failure classification follows the module's existing matrix — a CRM read
+    error is transient (NAK, redeliver), while rejected or unpivotable data is
+    deterministic (FAILED, ack). There is never an object to delete.
+    """
+    if (
+        snapshot.id_sharing_operation is None
+        or snapshot.period_start is None
+        or snapshot.period_end is None
+    ):
+        await persistence.save_failure(snapshot.id, "crm_source_incomplete")
+        return _Terminal(storage_key=None)
+
+    try:
+        async with AsyncSessionCRMFactory() as crm_session:
+            repository = CrmMeterRepository(crm_session)
+            # The worker has no request context, so the community is passed
+            # explicitly; with_community_scope would degrade to WHERE false.
+            summary = await repository.summarize(
+                id_community=snapshot.id_community,
+                id_sharing_operation=snapshot.id_sharing_operation,
+                period_start=snapshot.period_start,
+                period_end=snapshot.period_end,
+            )
+            preflight = crm_preflight.evaluate(summary)
+            # Skip the expensive read when the period is already rejected.
+            rows = (
+                await repository.fetch_rows(
+                    id_community=snapshot.id_community,
+                    id_sharing_operation=snapshot.id_sharing_operation,
+                    period_start=snapshot.period_start,
+                    period_end=snapshot.period_end,
+                )
+                if preflight.ok
+                else []
+            )
+    except Exception as exc:
+        raise _TransientError(f"crm read: {exc}") from exc
+
+    if preflight.blockers:
+        detail = "; ".join(b.detail for b in preflight.blockers)
+        await persistence.save_failure(snapshot.id, f"crm_data_rejected: {detail}")
+        return _Terminal(storage_key=None)
+
+    try:
+        frame = crm_timeseries.build_dataframe(rows, preflight.consumer_eans)
+        # The same converter the file path uses — the frame is deliberately
+        # shaped like a parsed upload so nothing below this line differs.
+        return data_loading.to_algorithm_raw_data(frame, crm_timeseries.INJECTION_COLUMN)
+    except (crm_timeseries.CrmPivotError, data_loading.InvalidInjectionColumnError) as exc:
+        await persistence.save_failure(snapshot.id, f"crm_pivot_failed: {exc}")
+        return _Terminal(storage_key=None)
+    except Exception as exc:
+        await persistence.save_failure(snapshot.id, f"crm_pivot_failed_unexpected: {exc}")
+        return _Terminal(storage_key=None)
+
+
 async def _snapshot_generation(generation_id: int) -> _GenerationSnapshot | None:
     """Read the row in a short-lived session and return a frozen snapshot.
 
@@ -438,9 +533,13 @@ async def _snapshot_generation(generation_id: int) -> _GenerationSnapshot | None
             return None
         return _GenerationSnapshot(
             id=row.id,
+            source=DataSource(row.source),
             file_storage_key=row.file_storage_key,
             file_name=row.file_name,
             injection_name=row.injection_name,
+            id_sharing_operation=row.id_sharing_operation,
+            period_start=row.period_start,
+            period_end=row.period_end,
             inputs=dict(row.inputs) if row.inputs else {},
             id_community=row.id_community,
             status=int(row.status),

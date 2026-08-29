@@ -32,6 +32,10 @@ INSERT into schema_version (version, description) VALUES(
        2, 'Rename generation.file_url to file_storage_key, widen to 512'
 ) ON CONFLICT DO NOTHING;
 
+INSERT into schema_version (version, description) VALUES(
+       3, 'Allow CRM-sourced generations (source, sharing operation, period)'
+) ON CONFLICT DO NOTHING;
+
 -- ---- generation ------------------------------------------------------------
 -- One row per allocation-key generation request. Holds the source file
 -- reference, the chosen algorithm + its input payload snapshot, and the
@@ -42,12 +46,24 @@ CREATE TABLE IF NOT EXISTS generation (
     name               VARCHAR(255) NOT NULL,
     id_community       INTEGER NOT NULL,
 
-    -- Source data
-    -- file_storage_key is the object key inside STORAGE_BUCKET (MinIO). The
-    -- service uploads on creation; the worker deletes on terminal outcomes.
-    file_storage_key   VARCHAR(512) NOT NULL,
-    file_name          VARCHAR(255) NOT NULL,
-    injection_name     VARCHAR(255) NOT NULL,
+    -- Source data: 1=FILE (uploaded CSV/XLSX), 2=CRM (meter_consumption).
+    -- Exactly one of the two column groups below is populated; the
+    -- ck_generation_source CHECK is what enforces that, now that the file
+    -- columns can no longer be NOT NULL.
+    source             SMALLINT     NOT NULL DEFAULT 1,
+
+    -- FILE only. file_storage_key is the object key inside STORAGE_BUCKET
+    -- (MinIO). The service uploads on creation; the worker deletes on terminal
+    -- outcomes. injection_name names the production column inside the file.
+    file_storage_key   VARCHAR(512) NULL,
+    file_name          VARCHAR(255) NULL,
+    injection_name     VARCHAR(255) NULL,
+
+    -- CRM only. The sharing operation and the inclusive local date range read
+    -- from meter_consumption. No FK: the CRM lives in a separate database.
+    id_sharing_operation INTEGER    NULL,
+    period_start       DATE         NULL,
+    period_end         DATE         NULL,
 
     -- Algorithm snapshot (keyed to algorithms.registry)
     algorithm_name     VARCHAR(64)  NOT NULL,
@@ -58,8 +74,24 @@ CREATE TABLE IF NOT EXISTS generation (
     status             INTEGER      NOT NULL DEFAULT 0,
     error_message      TEXT         NULL,
 
+    -- Non-blocking findings from the CRM pre-flight (meters with gaps, which
+    -- are zero-filled). Persisted so the warning outlives the preview screen.
+    data_warnings      JSONB        NULL,
+
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT ck_generation_source CHECK (
+        (source = 1
+            AND file_storage_key IS NOT NULL
+            AND file_name        IS NOT NULL
+            AND injection_name   IS NOT NULL)
+     OR (source = 2
+            AND id_sharing_operation IS NOT NULL
+            AND period_start         IS NOT NULL
+            AND period_end           IS NOT NULL
+            AND period_start <= period_end)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_generation_id_community ON generation (id_community);
