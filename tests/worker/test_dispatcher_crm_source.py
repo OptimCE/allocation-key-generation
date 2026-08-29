@@ -110,8 +110,12 @@ def _patch_crm(monkeypatch, *, summary, rows=None, raises: Exception | None = No
 async def test_returns_raw_data_built_from_crm_rows(monkeypatch, patched_save):
     repository = _patch_crm(
         monkeypatch,
-        summary=_summary([_coverage("A", consumption=40.0, injection=0.0),
-                          _coverage("PV", consumption=0.0, injection=100.0)]),
+        summary=_summary(
+            [
+                _coverage("A", consumption=40.0, injection=0.0),
+                _coverage("PV", consumption=0.0, injection=100.0),
+            ]
+        ),
         rows=_rows(),
     )
 
@@ -209,8 +213,9 @@ async def test_gaps_do_not_stop_the_run_and_are_zero_filled(monkeypatch, patched
         monkeypatch,
         summary=_summary(
             [
-                EanCoverage("A", row_count=2, distinct_ts=2, consumption_kwh=20.0,
-                            injection_kwh=0.0),
+                EanCoverage(
+                    "A", row_count=2, distinct_ts=2, consumption_kwh=20.0, injection_kwh=0.0
+                ),
                 _coverage("PV", consumption=0.0, injection=100.0),
             ]
         ),

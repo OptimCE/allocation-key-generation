@@ -226,4 +226,3 @@ async def save_failure(generation_id: int, error_message: str) -> None:
         scope_community_id=id_community,
         hint={"status": "failed"},
     )
-

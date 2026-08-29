@@ -95,8 +95,14 @@ def test_no_consuming_meter_blocks():
 def test_oversized_period_blocks():
     result = evaluate(
         _summary(
-            [_coverage("A", row_count=MAX_READING_ROWS + 1, distinct_ts=MAX_READING_ROWS + 1,
-                       injection_kwh=1.0)],
+            [
+                _coverage(
+                    "A",
+                    row_count=MAX_READING_ROWS + 1,
+                    distinct_ts=MAX_READING_ROWS + 1,
+                    injection_kwh=1.0,
+                )
+            ],
             grid_size=MAX_READING_ROWS + 1,
         )
     )

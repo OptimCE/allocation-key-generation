@@ -1,6 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
 
+from fastapi import Depends, FastAPI
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from starlette.middleware.cors import CORSMiddleware
+
 from algorithms import autodiscover
 from api.generation.routes import generation_routes
 from api.health.routes import health_router
@@ -15,9 +19,6 @@ from core.middleware.set_auth_context import GatewayScopeMiddleware
 from core.queue.init import close_nats, init_nats
 from core.realtime import log_realtime_state
 from core.tracing import enrich_span, setup_tracer_provider
-from fastapi import Depends, FastAPI
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from starlette.middleware.cors import CORSMiddleware
 
 configure_logging()
 logger = logging.getLogger(__name__)

@@ -32,7 +32,6 @@ from core.logging import configure_logging
 from core.queue.init import close_nats, get_jetstream, init_nats
 from core.realtime import log_realtime_state
 from core.tracing import setup_tracer_provider
-
 from worker import dispatcher
 
 logger = logging.getLogger(__name__)
