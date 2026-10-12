@@ -11,9 +11,10 @@ half-finished transactions from earlier steps.
 Idempotency under JetStream redelivery
 --------------------------------------
 The dispatcher already short-circuits when ``status != PENDING`` is
-observed up-front, but a long-running algorithm can exceed ack_wait while
-running, leading to a *concurrent* second delivery to a different worker.
-Both workers would then read ``status=PENDING`` and race to write results.
+observed up-front, but a running generation can still outlive ack_wait when
+its in-progress acks stop reaching JetStream (NATS lost mid-run), leading to
+a *concurrent* second delivery to a different worker. Both workers would
+then read ``status=PENDING`` and race to write results.
 
 To make this safe at the DB layer, both helpers perform a conditional
 ``UPDATE generation SET status=... WHERE id=? AND status=PENDING`` and use

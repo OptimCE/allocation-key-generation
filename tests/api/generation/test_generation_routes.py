@@ -32,6 +32,7 @@ from shared.models.local_models import (
     GenerationModel,
     IterationGeneratedModel,
 )
+from shared.problem_size import MAX_PROBLEM_CELLS
 from tests.factories.generation_factory import (
     create_full_key_tree,
     create_generation,
@@ -553,6 +554,44 @@ async def test_start_generation_empty_file_returns_422_and_skips_upload(
     mock_delete.assert_not_awaited()
 
 
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
+@patch("api.generation.service.get_jetstream", return_value=MagicMock())
+@patch("api.generation.service.send_event", new_callable=AsyncMock)
+async def test_start_generation_more_values_than_the_solver_can_hold_returns_422(
+    mock_send, mock_jetstream, mock_upload, mock_delete, client, db_session
+):
+    """A file over the participants x timesteps limit is refused before storage.
+
+    Three participants plus the production column, one data row past a third
+    of the limit: ~1 MB, far under the upload cap, yet too large to solve.
+    """
+    community = await _community_with_subscription(db_session)
+    rows = MAX_PROBLEM_CELLS // 3 + 1
+    content = b"a,b,c,production\n" + b"1,2,3,4\n" * rows
+
+    response = await client.post(
+        "/",
+        headers=_admin_headers(community),
+        **_multipart_payload(name="too large", file=("big.csv", content, "text/csv")),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == 2024  # PROBLEM_TOO_LARGE
+    mock_upload.assert_not_awaited()
+    mock_send.assert_not_awaited()
+    rows = (
+        (
+            await db_session.execute(
+                select(GenerationModel).where(GenerationModel.name == "too large")
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert rows == []
+
+
 @patch("api.generation.service.storage.upload", new_callable=AsyncMock)
 async def test_start_generation_chunked_body_over_cap_returns_413(
     mock_upload, monkeypatch, client, db_session
@@ -629,9 +668,13 @@ async def test_start_generation_large_body_with_content_length_is_accepted(
 
     # Over MAX_BODY_BYTES (2 MB), under UPLOAD_MAX_BODY_BYTES (50 MB). Sent via
     # files=/data= so httpx computes a real Content-Length. The route never
-    # parses the file — it uploads the bytes and publishes — so filler is fine.
-    file_bytes = b"col1,col2,production\n" + b"1,2,3\n" * 400_000
+    # parses the file, so filler is fine; it only counts rows and columns, so
+    # long numbers make up the bytes and keep it inside the solver's limit.
+    wide_row = b",".join([b"1." + b"0" * 30] * 3) + b"\n"
+    rows = 25_000
+    file_bytes = b"col1,col2,production\n" + wide_row * rows
     assert MAX_BODY_BYTES < len(file_bytes) < UPLOAD_MAX_BODY_BYTES
+    assert 2 * rows <= MAX_PROBLEM_CELLS
 
     response = await client.post(
         "/",

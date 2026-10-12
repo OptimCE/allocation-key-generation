@@ -14,6 +14,22 @@ Message handling follows a strict failure-class matrix:
 * **Transient failures** (storage 5xx/timeout, DB connection lost
   mid-persist) — nak the message so JetStream redelivers. We do not
   touch the row's status; the next delivery will retry from scratch.
+* **Solver crashes** (a solver pool process died: OOM kill, native crash)
+  — nak while the message's delivery count is below
+  ``_MAX_SOLVER_CRASH_DELIVERIES``, then mark the row FAILED
+  (``solver_crashed``) and ack. A crash breaks the whole pool, so the
+  generations solving beside the one that caused it see it too and are
+  retried as well. A crash that is deterministic (input too large for the
+  container) repeats on every delivery and must not loop forever.
+
+Long runs
+---------
+A generation can run far longer than ``_ACK_WAIT_SECONDS`` (waiting for a
+solver slot, then a few hundred solves). While ``_process`` works, the
+handler sends JetStream an in-progress ack every
+``_IN_PROGRESS_INTERVAL_SECONDS``, which restarts the message's ack_wait
+clock. The message is redelivered only once those stop: the worker died,
+lost NATS, or cancelled the generation on shutdown.
 
 The dispatcher never holds a DB session while running an algorithm —
 each step opens its own short-lived session, matching the architecture
@@ -33,11 +49,12 @@ after a successful ``_process`` return.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import datetime
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from concurrent.futures import BrokenExecutor, Executor
 
 from nats.aio.msg import Msg
@@ -56,8 +73,8 @@ from algorithms.registry import registry
 from core import metrics as app_metrics
 from core import storage
 from core.database.database import AsyncSessionCRMFactory, AsyncSessionLocalFactory
-from core.queue.helper import Event
-from shared import crm_preflight, crm_timeseries, data_loading
+from core.queue.helper import Event, subscribe_durable
+from shared import crm_preflight, crm_timeseries, data_loading, problem_size
 from shared.const import DataSource, GenerationStatus
 from shared.crm_meter_repository import CrmMeterRepository
 from shared.models.local_models import GenerationModel
@@ -65,15 +82,29 @@ from worker import persistence
 
 logger = logging.getLogger(__name__)
 
-# Long enough to cover any realistic OLAGSA-style optimisation. JetStream
-# will not redeliver until ack_wait elapses, so this also caps how long a
-# silent crash can stall the queue.
+# JetStream redelivers a message that is neither acked nor marked in progress
+# within this window. Generations routinely run longer (20 meters x 92 days
+# with 2 iterations is 208 solves and over 9 minutes; 3 iterations about
+# double that), so the handler keeps resetting it with in-progress acks
+# (``_IN_PROGRESS_INTERVAL_SECONDS``). What it still bounds is how long a
+# generation whose worker died or lost NATS waits before another delivery.
 _ACK_WAIT_SECONDS = 10 * 60
+
+# How often a generation still being processed sends an in-progress ack.
+# Well under ack_wait, so a few lost or late acks never let it lapse.
+_IN_PROGRESS_INTERVAL_SECONDS = 60
 
 # How long JetStream waits before redelivering after a NAK. Short enough
 # to retry transient failures quickly, long enough to not hot-loop on a
 # flaky downstream.
 _NAK_RETRY_DELAY_SECONDS = 30
+
+# The delivery on which a solver crash stops being retried and the generation
+# is marked FAILED. Counts every delivery of the message, including ones that
+# ended for another reason (a storage NAK, an expired ack_wait). Small, because
+# a deterministic crash costs a full run each time; above 1, because a crash
+# also fails the generations solving next to the one that caused it.
+_MAX_SOLVER_CRASH_DELIVERIES = 3
 
 
 @dataclasses.dataclass(frozen=True)
@@ -132,18 +163,20 @@ async def subscribe_algorithm(
       can await them on shutdown.
     * ``max_ack_pending`` bounds how many messages JetStream delivers
       unacked; set to the pool size so the broker never hands us more work
-      than we can actively solve. (JetStream upserts this on an existing
-      durable; a consumer created by an older build is updated in place.)
+      than we can actively solve.
+
+    ``subscribe_durable`` writes ``ack_wait`` and ``max_ack_pending`` onto a
+    durable an earlier build created. ``js.subscribe`` alone would not: it
+    binds with the broker's stored values and ignores the ones passed here.
     """
     handler = _make_handler(meta, executor=executor, semaphore=semaphore, inflight=inflight)
     config_kwargs: dict = {"ack_wait": _ACK_WAIT_SECONDS}
     if max_ack_pending is not None:
         config_kwargs["max_ack_pending"] = max_ack_pending
-    sub = await js.subscribe(
+    sub = await subscribe_durable(
+        js,
         subject=meta.queue,
         durable=f"worker-{meta.name}",
-        queue=f"worker-{meta.name}",
-        manual_ack=True,
         cb=handler,
         config=ConsumerConfig(**config_kwargs),
     )
@@ -225,7 +258,10 @@ async def _handle_message(
         return
 
     try:
-        outcome = await _process(meta, generation_id, msg, executor=executor, semaphore=semaphore)
+        async with _in_progress_until_done(msg, generation_id):
+            outcome = await _process(
+                meta, generation_id, msg, executor=executor, semaphore=semaphore
+            )
     except _TransientError as exc:
         logger.warning(
             "Transient failure for generation %d, will redeliver: %s",
@@ -250,12 +286,63 @@ async def _handle_message(
         await _delete_safely(outcome.storage_key)
 
 
+@contextlib.asynccontextmanager
+async def _in_progress_until_done(msg: Msg, generation_id: int) -> AsyncIterator[None]:
+    """Keep JetStream from redelivering ``msg`` while the block runs.
+
+    Covers all of ``_process``, not only the solve: waiting for a solver slot
+    can also outlast ack_wait (the semaphore is shared by every algorithm's
+    subscription), and a redelivered copy would become a second task that
+    runs the whole generation again. Stops on any exit, normal, raised or
+    cancelled (the shutdown drain), before the handler acks or naks.
+    """
+    heartbeat = asyncio.create_task(_send_in_progress(msg, generation_id))
+    try:
+        yield
+    finally:
+        heartbeat.cancel()
+        # Wait for it to stop, so no in-progress ack follows the ack or nak.
+        # asyncio.wait neither raises the heartbeat's CancelledError nor
+        # swallows a cancellation of this task.
+        await asyncio.wait({heartbeat})
+
+
+async def _send_in_progress(msg: Msg, generation_id: int) -> None:
+    """Send an in-progress ack every ``_IN_PROGRESS_INTERVAL_SECONDS``, forever."""
+    while True:
+        await asyncio.sleep(_IN_PROGRESS_INTERVAL_SECONDS)
+        try:
+            await msg.in_progress()
+        except Exception as exc:
+            # Not worth failing the generation over: the next one may get
+            # through, and if none do, the message is redelivered after
+            # ack_wait as if it had no heartbeat.
+            logger.warning("In-progress ack for generation %d failed: %s", generation_id, exc)
+
+
+def _delivery_count(msg: Msg) -> int | None:
+    """JetStream's delivery count for ``msg`` (1 on the first delivery), or None."""
+    try:
+        return int(msg.metadata.num_delivered)
+    except Exception:
+        return None
+
+
 class _TransientError(Exception):
     """Raised inside ``_process`` to signal the message should be NAK'd.
 
     The cleanup contract relies on this being raised (not returned): when
     the handler catches it, the file is left in place so the redelivered
     message can still read it.
+    """
+
+
+class _SolverCrashError(Exception):
+    """Raised by ``_run_algorithm`` when a solver pool process died mid-solve.
+
+    The pool reports that as ``BrokenExecutor`` (``BrokenProcessPool``),
+    typically the kernel's OOM killer or a native crash in the solver.
+    ``_process`` decides from the delivery count whether it is retried.
     """
 
 
@@ -302,6 +389,16 @@ async def _process(
         return loaded
     raw_data = loaded
 
+    # ---- Step 3b: refuse what one solver process cannot hold -----------
+    # The CRM pre-flight and the upload route check this before queueing, but
+    # the upload count is approximate (and skipped for a file it cannot read).
+    # This is the exact parsed shape, checked before any solver memory is spent.
+    num_participants, num_timesteps = raw_data.C.shape
+    oversize = problem_size.too_large(num_participants, num_timesteps)
+    if oversize:
+        await persistence.save_failure(generation_id, f"problem_too_large: {oversize}")
+        return _Terminal(storage_key=snapshot.file_storage_key)
+
     # ---- Step 4: re-validate inputs against the algorithm schema -------
     # Defensive: the API validates these on creation, but a row written
     # directly to the DB (or one created against an older algorithm
@@ -326,6 +423,12 @@ async def _process(
         result = await _run_algorithm(
             meta.name, impl_cls, algo_input, raw_data, executor, semaphore
         )
+    except _SolverCrashError as exc:
+        app_metrics.generation_duration.record(
+            time.perf_counter() - start,
+            {"algorithm": meta.name, "status": "failed"},
+        )
+        return await _after_solver_crash(generation_id, msg, exc, snapshot.file_storage_key)
     except Exception as exc:
         # Record duration even for failures — the time-to-failure is a
         # useful signal for slow-failing algorithms (e.g. solver timeout).
@@ -354,6 +457,35 @@ async def _process(
 
     logger.info("Generation %d processed successfully", generation_id)
     return _Terminal(storage_key=snapshot.file_storage_key)
+
+
+async def _after_solver_crash(
+    generation_id: int, msg: Msg, exc: _SolverCrashError, storage_key: str | None
+) -> _Terminal:
+    """Retry a solver crash on a later delivery, up to a point.
+
+    Raises ``_TransientError`` (NAK) while the delivery count is below
+    ``_MAX_SOLVER_CRASH_DELIVERIES``: the crash may have come from another
+    generation sharing the pool, or from memory pressure that has passed.
+    From that delivery on (or when the count cannot be read, so a crash can
+    never loop) the generation is marked FAILED and its file released.
+    """
+    delivered = _delivery_count(msg)
+    if delivered is not None and delivered < _MAX_SOLVER_CRASH_DELIVERIES:
+        raise _TransientError(
+            f"solver crashed on delivery {delivered} of {_MAX_SOLVER_CRASH_DELIVERIES}: {exc}"
+        ) from exc
+    delivery = "unknown" if delivered is None else str(delivered)
+    logger.error(
+        "Solver crashed for generation %d on delivery %s; not retrying: %s",
+        generation_id,
+        delivery,
+        exc,
+    )
+    await persistence.save_failure(
+        generation_id, f"solver_crashed (likely out of memory) on delivery {delivery}: {exc}"
+    )
+    return _Terminal(storage_key=storage_key)
 
 
 async def _run_algorithm(
@@ -386,12 +518,12 @@ async def _run_algorithm(
                 executor, _run_algorithm_subprocess, algo_name, algo_input, raw_data
             )
     except BrokenExecutor as exc:
-        # A pool worker died abnormally (OOM, native crash in the solver).
-        # Treat as transient — redeliver rather than wrongly mark this
-        # generation FAILED. The pool rebuilds itself on the next submit
-        # (see worker.main._SolverPool), so the redelivery lands on a fresh
-        # worker.
-        raise _TransientError(f"solver pool broken: {exc}") from exc
+        # A pool worker died abnormally (OOM kill, native crash in the
+        # solver). That breaks the whole pool, so every solve running in it
+        # lands here, not only the one that crashed. The pool rebuilds itself
+        # on the next submit (see worker.main._SolverPool); whether this
+        # generation gets that next submit is _after_solver_crash's call.
+        raise _SolverCrashError(str(exc)) from exc
 
 
 def _run_algorithm_subprocess(

@@ -41,7 +41,12 @@ class BruteForceGenerator:
         self.nb_iterations = nb_iterations
 
     def generate(self, C: np.ndarray, VA: np.ndarray) -> list[Node]:
-        """Run the enumeration. Returns a list of root :class:`Node` trees."""
+        """Run the enumeration. Returns a list of root :class:`Node` trees.
+
+        The nodes hold summaries only. Each iteration's time series are
+        dropped once the next iteration is built from them, so a few
+        iterations are alive at any time, however many keys are enumerated.
+        """
         C = np.asarray(C, dtype=float)
         VA = np.asarray(VA, dtype=float)
         root = _make_root_iteration(C, VA)
@@ -73,8 +78,7 @@ class BruteForceGenerator:
             pct1 = i / 10
             pct2 = 1 - i / 10
             for algo1 in ALGO_NAMES:
-                node1 = self._apply_first(root, pct1, algo1)
-                iter1_post = node1.iteration
+                node1, iter1_post = self._apply_first(root, pct1, algo1)
 
                 base_iter2 = self._build_next_iteration(root, iter1_post, VA, pct2)
                 for algo2 in ALGO_NAMES:
@@ -96,8 +100,7 @@ class BruteForceGenerator:
                 pct3_raw = 1 - pct1 - pct2
                 pct3 = pct3_raw if pct3_raw > 0 else 0
                 for algo1 in ALGO_NAMES:
-                    node1 = self._apply_first(root, pct1, algo1)
-                    iter1_post = node1.iteration
+                    node1, iter1_post = self._apply_first(root, pct1, algo1)
 
                     base_iter2 = self._build_next_iteration(root, iter1_post, VA, pct2)
                     for algo2 in ALGO_NAMES:
@@ -116,14 +119,13 @@ class BruteForceGenerator:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _apply_first(self, root: Iteration, pct: float, algo: str) -> Node:
+    def _apply_first(self, root: Iteration, pct: float, algo: str) -> tuple[Node, Iteration]:
         """Apply the first iteration's distribution function on a fresh copy of the root."""
         it = root.copy()
         it.energy_allocated_percentage = pct
         # Scale the production matrix by the percentage assigned to this iteration.
         it.energy_allocated = root.energy_allocated * pct
-        node, _ = ALGOS[algo](it)
-        return node
+        return ALGOS[algo](it)
 
     def _build_next_iteration(
         self,

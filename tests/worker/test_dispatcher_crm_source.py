@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from shared import problem_size
 from shared.const import DataSource
 from shared.crm_meter_repository import ConsumptionRow, CrmDataSummary, EanCoverage
 from worker import dispatcher
@@ -187,6 +188,29 @@ async def test_no_injection_fails_deterministically(monkeypatch, patched_save):
 
     assert isinstance(result, dispatcher._Terminal)
     assert "nothing to share" in patched_save.await_args.args[1]
+
+
+async def test_a_period_too_large_to_solve_fails_before_the_read(monkeypatch, patched_save):
+    # Two participants on the 4-step grid are 8 values; with the limit at 7 the
+    # worker must reach the preview's verdict and skip the expensive read.
+    monkeypatch.setattr(problem_size, "MAX_PROBLEM_CELLS", 7)
+    repository = _patch_crm(
+        monkeypatch,
+        summary=_summary(
+            [
+                _coverage("A", consumption=40.0, injection=10.0),
+                _coverage("B", consumption=5.0, injection=0.0),
+            ]
+        ),
+    )
+
+    result = await dispatcher._load_from_crm(_snapshot())
+
+    assert isinstance(result, dispatcher._Terminal)
+    detail = patched_save.await_args.args[1]
+    assert "crm_data_rejected" in detail
+    assert "2 participants x 4 timesteps" in detail
+    repository.fetch_rows.assert_not_awaited()
 
 
 async def test_incomplete_crm_columns_fail_deterministically(monkeypatch, patched_save):

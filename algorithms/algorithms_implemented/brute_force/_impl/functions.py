@@ -3,7 +3,8 @@
 Each function takes an :class:`Iteration` (already configured with the
 energy available to this iteration), mutates the consumers' allocations
 in place, computes per-consumer residuals/surpluses and aggregated
-surplus, and returns ``(Node, iteration)``.
+surplus, and returns ``(Node, iteration)``. The node holds the iteration's
+summary only; the iteration is returned for building the next one.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ def egalitaire(iteration: Iteration) -> tuple[Node, Iteration]:
 
     iteration.compute_surplus()
     iteration.compute_surplus_total()
-    return Node(name="egalitaire", iteration=iteration, surplus=iteration.surplus_total), iteration
+    return Node(name="egalitaire", summary=iteration.summary()), iteration
 
 
 def prorata_total(iteration: Iteration) -> tuple[Node, Iteration]:
@@ -69,9 +70,7 @@ def prorata_total(iteration: Iteration) -> tuple[Node, Iteration]:
 
     iteration.compute_surplus()
     iteration.compute_surplus_total()
-    return Node(
-        name="prorata_total", iteration=iteration, surplus=iteration.surplus_total
-    ), iteration
+    return Node(name="prorata_total", summary=iteration.summary()), iteration
 
 
 def prorata(iteration: Iteration) -> tuple[Node, Iteration]:
@@ -105,7 +104,7 @@ def prorata(iteration: Iteration) -> tuple[Node, Iteration]:
 
     iteration.compute_surplus()
     iteration.compute_surplus_total()
-    return Node(name="prorata", iteration=iteration, surplus=iteration.surplus_total), iteration
+    return Node(name="prorata", summary=iteration.summary()), iteration
 
 
 ALGOS: dict[str, Callable[[Iteration], tuple[Node, Iteration]]] = {

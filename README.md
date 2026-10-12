@@ -192,6 +192,52 @@ docker build -f Dockerfile.worker -t allocation-key-generation-worker .
 `Dockerfile.production` builds the production API image. In the monorepo dev
 stack the API is reachable on host port **8002**.
 
+## Resource sizing
+
+The worker solves in a pool of processes, one per CPU it is given minus one (the
+compose files give it 2 CPUs, hence one solver process). What a generation costs
+grows with **participants × timesteps**, the size of its consumption matrix; a
+quarter-hour series has 96 timesteps a day.
+
+OLAGSA's solver process, measured with cvxpy 1.6.3 in the worker image on one CPU:
+
+| Participants × timesteps | For example | Peak memory | One solve |
+|---|---|---|---|
+| 176,640 | 20 meters × 92 days | 0.5 GB | 2.5 s |
+| 353,280 | 20 meters × 184 days | 0.85 GB | 5.5 s |
+| 706,560 | 40 meters × 184 days | 1.5 GB | 10.5 s |
+
+A generation solves a few hundred times: 208 solves and 9 minutes for 20 meters ×
+92 days with the default hyperparameters and 2 iterations. Population size and
+generations change the run time, not the peak memory.
+
+- **Limit.** A generation over **400,000** participants × timesteps (about 1 GB
+  per solver process) is refused with error 2024: by the CRM preview and
+  `POST /from-crm` (listed with the other blockers), by `POST /` for an uploaded
+  file, and again by the worker once the data is parsed. That is 20 meters for
+  up to 208 days, or 10 meters for a year. The value lives in
+  `shared/problem_size.py`; raise it only together with the worker's memory.
+- **Container memory.** Give the worker about 0.3 GB plus 1 GB per solver
+  process. The monorepo and production compose files set `mem_limit: 2g` for
+  one. Without a limit, a solver that outgrows the host is OOM-killed and other
+  containers may go too.
+- **Solver crashes.** A solver process killed for memory (or crashing) breaks
+  the whole pool, so every generation solving at that moment fails with it. Each
+  is delivered again; a crash on a generation's third delivery or later marks it
+  failed with `solver_crashed (likely out of memory)`. A generation that is
+  simply too big for the container therefore runs up to three times.
+- **brute_force** holds the time series of the few iterations it is computing,
+  not those of every candidate key. With 20 meters, 3 iterations (1,782 keys)
+  peak at 0.09 GB for 31 days, 0.12 GB for 92 days and 0.21 GB at the limit
+  above (208 days), in 25 s, 70 s and 2.7 minutes, most of it in the `prorata`
+  distribution. 1 or 2 iterations peak lower and finish within 8 s.
+- **Long runs.** A generation may run well past JetStream's 10-minute
+  `ack_wait` (`worker/dispatcher.py`): while it is processed, including while it
+  waits for a free solver process, the worker sends an in-progress
+  acknowledgement every minute. It is delivered again only once those stop, 10
+  minutes after the last one: the worker crashed, lost NATS, or was shut down
+  mid-run.
+
 ## Testing & Quality
 
 ```bash

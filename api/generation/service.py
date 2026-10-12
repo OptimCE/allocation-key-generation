@@ -6,6 +6,7 @@ from fastapi import UploadFile
 from pydantic import ValidationError
 
 from algorithms.registry import registry
+from api.generation import upload_shape
 from api.generation.mappers import (
     to_allocation_key_crm,
     to_allocation_key_generated_schema,
@@ -31,7 +32,7 @@ from core.errors.errors import ErrorException
 from core.middleware.request_limits import UPLOAD_MAX_BODY_BYTES
 from core.queue.helper import Event, send_event
 from core.queue.init import get_jetstream
-from shared import crm_preflight
+from shared import crm_preflight, problem_size
 from shared.const import DataSource, GenerationStatus
 from shared.crm_meter_repository import CrmMeterRepository
 from shared.crm_preflight import Preflight
@@ -147,6 +148,19 @@ class GenerationService:
                 status_code=422,
             )
         file_name = file.filename or "uploaded-file"
+
+        # 3b. Refuse a file the solver could not hold in memory before storing
+        # and queueing it. The count is approximate and errs high; the worker
+        # re-checks the parsed matrix, and a file that cannot be counted here
+        # goes through to it.
+        shape = upload_shape.measure(content, file_name)
+        if shape is not None:
+            columns, data_rows = shape
+            # One column is the injection profile; every other one is a participant.
+            oversize = problem_size.too_large(max(columns - 1, 0), data_rows)
+            if oversize:
+                logger.info("Upload refused for community %d: %s", community_id, oversize)
+                raise ErrorException(error=errors.generation.PROBLEM_TOO_LARGE, status_code=422)
 
         # 4. Upload to MinIO. The community_id keeps keys browsable per
         # tenant; the UUID guarantees no collisions when two requests use

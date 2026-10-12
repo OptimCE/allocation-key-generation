@@ -203,6 +203,56 @@ docker build -f Dockerfile.worker -t allocation-key-generation-worker .
 Entwicklungsstack des Monorepos ist die API auf dem Host-Port **8002**
 erreichbar.
 
+## Ressourcenbemessung
+
+Der Worker löst in einem Prozesspool, ein Prozess pro zugewiesener CPU minus eins
+(die Compose-Dateien geben ihm 2 CPUs, also einen Solver-Prozess). Der Aufwand
+einer Erzeugung wächst mit **Teilnehmer × Zeitschritte**, der Größe ihrer
+Verbrauchsmatrix; eine Viertelstundenreihe hat 96 Zeitschritte pro Tag.
+
+Solver-Prozess von OLAGSA, gemessen mit cvxpy 1.6.3 im Worker-Image auf einer CPU:
+
+| Teilnehmer × Zeitschritte | Zum Beispiel | Spitzenspeicher | Ein Lösungslauf |
+|---|---|---|---|
+| 176.640 | 20 Zähler × 92 Tage | 0,5 GB | 2,5 s |
+| 353.280 | 20 Zähler × 184 Tage | 0,85 GB | 5,5 s |
+| 706.560 | 40 Zähler × 184 Tage | 1,5 GB | 10,5 s |
+
+Eine Erzeugung löst einige hundert Mal: 208 Lösungsläufe und 9 Minuten für
+20 Zähler × 92 Tage mit den Standard-Hyperparametern und 2 Iterationen.
+Populationsgröße und Generationen ändern die Laufzeit, nicht den Spitzenspeicher.
+
+- **Grenze.** Eine Erzeugung über **400.000** Teilnehmer × Zeitschritte (etwa
+  1 GB pro Solver-Prozess) wird mit Fehler 2024 abgelehnt: von der CRM-Vorschau
+  und `POST /from-crm` (bei den übrigen Blockern), von `POST /` für eine
+  hochgeladene Datei und erneut vom Worker, sobald die Daten gelesen sind. Das
+  entspricht 20 Zählern für höchstens 208 Tage oder 10 Zählern für ein Jahr. Der
+  Wert steht in `shared/problem_size.py`; erhöhen Sie ihn nur zusammen mit dem
+  Speicher des Workers.
+- **Container-Speicher.** Geben Sie dem Worker etwa 0,3 GB plus 1 GB pro
+  Solver-Prozess. Die Compose-Dateien des Monorepos und der Produktion setzen
+  `mem_limit: 2g` für einen. Ohne Grenze wird ein Solver, der über den Speicher
+  des Hosts hinauswächst, per OOM beendet, und andere Container können
+  mitgerissen werden.
+- **Solver-Abstürze.** Ein Solver-Prozess, der wegen Speichermangels beendet
+  wird (oder abstürzt), bricht den ganzen Pool: jede Erzeugung, die in diesem
+  Moment gelöst wird, scheitert mit ihm. Jede wird erneut zugestellt; ein
+  Absturz ab der dritten Zustellung einer Erzeugung markiert sie als
+  fehlgeschlagen mit `solver_crashed (likely out of memory)`. Eine Erzeugung,
+  die schlicht zu groß für den Container ist, läuft daher bis zu dreimal.
+- **brute_force** hält nur die Zeitreihen der wenigen Iterationen im Speicher,
+  die er gerade berechnet, nicht die jedes Kandidatenschlüssels. Mit 20 Zählern
+  erreichen 3 Iterationen (1.782 Schlüssel) 0,09 GB für 31 Tage, 0,12 GB für
+  92 Tage und 0,21 GB an der obigen Grenze (208 Tage), in 25 s, 70 s und
+  2,7 Minuten, die meiste Zeit in der Verteilung `prorata`. 1 oder
+  2 Iterationen bleiben darunter und sind in höchstens 8 s fertig.
+- **Lange Läufe.** Eine Erzeugung darf weit länger laufen als das 10-minütige
+  `ack_wait` von JetStream (`worker/dispatcher.py`): solange sie verarbeitet
+  wird, auch während sie auf einen freien Solver-Prozess wartet, sendet der
+  Worker jede Minute eine In-Progress-Bestätigung. Erneut zugestellt wird sie
+  erst, wenn diese ausbleiben, 10 Minuten nach der letzten: der Worker ist
+  abgestürzt, hat NATS verloren oder wurde mitten im Lauf beendet.
+
 ## Tests und Qualität
 
 ```bash

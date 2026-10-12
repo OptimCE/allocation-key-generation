@@ -28,10 +28,11 @@ _ALL_KEYS = sorted(
 
 # Collect parameter i18n keys from all registered algorithms' input schemas.
 # conftest._register_algorithms (autouse, session-scoped) populates the registry
-# before tests run, but module-level code executes at collection time — guard with
-# the same idempotency pattern conftest uses.
-if not _registry.list_all():
-    _autodiscover()
+# before tests run, but module-level code executes at collection time. Discover
+# unconditionally: a test module collected earlier may have imported a single
+# algorithm (tests/algorithms/test_brute_force.py), and a non-empty registry
+# would then hide the others' keys. A repeated call registers nothing twice.
+_autodiscover()
 
 _ALL_PARAMETER_KEYS = sorted(
     {

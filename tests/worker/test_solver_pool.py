@@ -23,10 +23,8 @@ from __future__ import annotations
 import asyncio
 import pickle
 from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 
 import numpy as np
-from nats.js.api import ConsumerConfig
 from pydantic import Field
 
 from algorithms.base import (
@@ -36,6 +34,7 @@ from algorithms.base import (
     AlgorithmResult,
 )
 from core.queue.helper import Event
+from tests.fake_jetstream import FakeJetStream
 from worker import dispatcher
 from worker import main as worker_main
 
@@ -300,34 +299,42 @@ async def test_handler_runs_inline_when_no_inflight(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def _algorithms_js() -> FakeJetStream:
+    return FakeJetStream({"ALGORITHMS": ["optimce.allocation.>"]})
+
+
 async def test_subscribe_sets_ack_wait_and_max_ack_pending():
-    captured: dict = {}
+    js = _algorithms_js()
+    meta = _make_meta()
 
-    class _FakeJS:
-        async def subscribe(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace()
+    await dispatcher.subscribe_algorithm(js, meta, max_ack_pending=3)
 
-    await dispatcher.subscribe_algorithm(_FakeJS(), _make_meta(), max_ack_pending=3)
-
-    config = captured["config"]
+    config = js.stored(meta.queue, f"worker-{meta.name}")
     assert config.ack_wait == dispatcher._ACK_WAIT_SECONDS
     assert config.max_ack_pending == 3
 
 
-async def test_subscribe_omits_max_ack_pending_when_unset():
-    """Backwards-compatible default: no explicit max_ack_pending override."""
-    captured: dict = {}
+async def test_subscribe_updates_a_durable_an_earlier_build_created():
+    """The dev durables created on 2026-05-11 still had max_ack_pending=1000."""
+    js = _algorithms_js()
+    meta = _make_meta()
+    js.seed(meta.queue, f"worker-{meta.name}", ack_wait=120.0)
 
-    class _FakeJS:
-        async def subscribe(self, **kwargs):
-            captured.update(kwargs)
-            return SimpleNamespace()
+    await dispatcher.subscribe_algorithm(js, meta, max_ack_pending=1)
 
-    await dispatcher.subscribe_algorithm(_FakeJS(), _make_meta())
-
-    config = captured["config"]
+    config = js.stored(meta.queue, f"worker-{meta.name}")
     assert config.ack_wait == dispatcher._ACK_WAIT_SECONDS
-    # Left at the ConsumerConfig default rather than forced to a value.
-    default = ConsumerConfig(ack_wait=dispatcher._ACK_WAIT_SECONDS)
-    assert config.max_ack_pending == default.max_ack_pending
+    assert config.max_ack_pending == 1
+
+
+async def test_subscribe_omits_max_ack_pending_when_unset():
+    """Without an explicit max_ack_pending the durable keeps the broker's value."""
+    js = _algorithms_js()
+    meta = _make_meta()
+    js.seed(meta.queue, f"worker-{meta.name}", max_ack_pending=7)
+
+    await dispatcher.subscribe_algorithm(js, meta)
+
+    config = js.stored(meta.queue, f"worker-{meta.name}")
+    assert config.ack_wait == dispatcher._ACK_WAIT_SECONDS
+    assert config.max_ack_pending == 7
