@@ -1,9 +1,9 @@
 """Idempotency tests for worker.persistence.
 
 The dispatcher already short-circuits when ``status != PENDING`` is
-observed before it starts processing, but a long-running algorithm can
-exceed JetStream's ack_wait while the worker holds the message — JetStream
-will then redeliver to a different worker in the same queue group, and
+observed before it starts processing, but a running generation can outlive
+JetStream's ack_wait when its in-progress acks stop reaching the broker —
+JetStream will then redeliver to a different worker in the same queue group, and
 both workers will read ``status=PENDING`` from their initial snapshot.
 
 These tests prove that the conditional-UPDATE-WHERE-PENDING guard inside

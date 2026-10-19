@@ -35,7 +35,8 @@
       "CRM_NO_INJECTION": "No energy was injected over this period, so there is nothing to share (code: 2020)",
       "CRM_NO_CONSUMERS": "No meter drew any energy over this period (code: 2021)",
       "CRM_RANGE_TOO_LARGE": "The selected period holds too many readings, please shorten it (code: 2022)",
-      "GET_CRM_PREVIEW": "The metering data could not be checked (code: 2023)"
+      "GET_CRM_PREVIEW": "The metering data could not be checked (code: 2023)",
+      "PROBLEM_TOO_LARGE": "Too much data for a single generation (participants × timesteps), please shorten the period or reduce the number of participants (code: 2024)"
     }
   },
   "ALGORITHMS": {
@@ -50,7 +51,7 @@
     "OLAGSA": {
       "ITERATIONS": {
         "TITLE": "Number of iterations",
-        "DESCRIPTION": "Number of iterations of the genetic algorithm."
+        "DESCRIPTION": "Number of iterations in the generated allocation key. Must be 1, 2, or 3. With 1 iteration all the production is shared in a single pass, so the advanced options have no effect."
       },
       "GENERATIONS": {
         "TITLE": "Number of generations",

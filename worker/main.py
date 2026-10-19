@@ -62,9 +62,10 @@ _ALGORITHM_STREAM_NAME = "ALGORITHMS"
 _HEARTBEAT_PATH = pathlib.Path("/tmp/worker.alive")  # noqa: S108 — dedicated container, non-root app user, no other writers
 
 # How long shutdown waits for in-flight solves to finish + ack before giving
-# up on them (they redeliver after ack_wait — the persistence idempotency
-# guard makes that safe). Kept comfortably under a typical orchestrator
-# SIGTERM grace period so we don't get SIGKILL'd mid-drain.
+# up on them (cancelling one stops its in-progress acks, so it redelivers
+# once ack_wait runs out — the persistence idempotency guard makes that
+# safe). Kept comfortably under a typical orchestrator SIGTERM grace period
+# so we don't get SIGKILL'd mid-drain.
 _INFLIGHT_DRAIN_TIMEOUT_SECONDS = 25
 
 
@@ -129,10 +130,12 @@ class _SolverPool(Executor):
     ProcessPoolExecutor: every subsequent ``submit`` raises
     ``BrokenProcessPool``. Left unhandled, the worker would keep running and
     look healthy while silently failing every solve. Rebuilding on the next
-    submit restores capacity; the generation that tripped the break is
-    redelivered (``dispatcher._run_algorithm`` maps the break to a transient
-    failure). ``submit`` is only ever called from the event-loop thread (via
-    ``loop.run_in_executor``), so the rebuild needs no extra locking.
+    submit restores capacity. Every generation solving when the pool broke
+    sees the break, and the dispatcher retries each on a later delivery
+    until ``dispatcher._MAX_SOLVER_CRASH_DELIVERIES``, then marks it FAILED
+    (``solver_crashed``). ``submit`` is only ever called from the event-loop
+    thread (via ``loop.run_in_executor``), so the rebuild needs no extra
+    locking.
     """
 
     def __init__(self, max_workers: int, initializer: Callable[[], None]) -> None:
@@ -221,6 +224,30 @@ async def _poll_queue_depth(js, shutdown_event: asyncio.Event) -> None:
             continue
 
 
+async def _drain_inflight(inflight: set[asyncio.Task]) -> None:
+    """Let in-flight generations finish + ack while NATS is still up.
+
+    The handler returns as soon as it spawns the task, so sub.drain() does
+    not cover this work — await it explicitly, bounded so a long-running
+    solve can't stall shutdown past the SIGTERM grace. Stragglers are
+    cancelled, which also stops their in-progress acks: they redeliver once
+    ack_wait runs out (idempotency guard makes that safe).
+    """
+    if not inflight:
+        return
+    logger.info("Waiting for %d in-flight generation(s) to finish...", len(inflight))
+    _done, pending = await asyncio.wait(set(inflight), timeout=_INFLIGHT_DRAIN_TIMEOUT_SECONDS)
+    if pending:
+        logger.warning(
+            "%d generation(s) still running after %ds; cancelling — they will be "
+            "redelivered after ack_wait",
+            len(pending),
+            _INFLIGHT_DRAIN_TIMEOUT_SECONDS,
+        )
+        for task in pending:
+            task.cancel()
+
+
 async def main() -> None:
     configure_logging()
     # Absence of this line means the image predates the realtime feature —
@@ -282,26 +309,7 @@ async def main() -> None:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await queue_depth_task
 
-        # Let in-flight solves finish + ack while NATS is still up. The
-        # handler returns as soon as it spawns the task, so sub.drain() no
-        # longer covers this work — await it explicitly, bounded so a
-        # long-running solve can't stall shutdown past the SIGTERM grace.
-        # Stragglers redeliver after ack_wait (idempotency guard makes that
-        # safe).
-        if inflight:
-            logger.info("Waiting for %d in-flight generation(s) to finish...", len(inflight))
-            _done, pending = await asyncio.wait(
-                set(inflight), timeout=_INFLIGHT_DRAIN_TIMEOUT_SECONDS
-            )
-            if pending:
-                logger.warning(
-                    "%d generation(s) still running after %ds; cancelling — they will be "
-                    "redelivered after ack_wait",
-                    len(pending),
-                    _INFLIGHT_DRAIN_TIMEOUT_SECONDS,
-                )
-                for task in pending:
-                    task.cancel()
+        await _drain_inflight(inflight)
 
         # Drain in best-effort order. Each step is wrapped because we want
         # later steps to run even if an earlier one fails (e.g. NATS

@@ -35,7 +35,8 @@
       "CRM_NO_INJECTION": "Er is in deze periode niets geïnjecteerd, dus er valt niets te delen (code: 2020)",
       "CRM_NO_CONSUMERS": "Geen enkele meter heeft in deze periode energie afgenomen (code: 2021)",
       "CRM_RANGE_TOO_LARGE": "De geselecteerde periode bevat te veel meetwaarden, kies een kortere periode (code: 2022)",
-      "GET_CRM_PREVIEW": "De meetgegevens konden niet worden gecontroleerd (code: 2023)"
+      "GET_CRM_PREVIEW": "De meetgegevens konden niet worden gecontroleerd (code: 2023)",
+      "PROBLEM_TOO_LARGE": "Te veel gegevens voor één generatie (deelnemers × tijdstappen), kies een kortere periode of minder deelnemers (code: 2024)"
     }
   },
   "ALGORITHMS": {
@@ -50,7 +51,7 @@
     "OLAGSA": {
       "ITERATIONS": {
         "TITLE": "Aantal iteraties",
-        "DESCRIPTION": "Aantal iteraties van het genetisch algoritme."
+        "DESCRIPTION": "Aantal iteraties van de gegenereerde verdeelsleutel. Moet 1, 2 of 3 zijn. Met 1 iteratie wordt alle productie in één keer verdeeld en hebben de geavanceerde opties geen effect."
       },
       "GENERATIONS": {
         "TITLE": "Aantal generaties",

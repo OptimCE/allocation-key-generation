@@ -202,6 +202,58 @@ docker build -f Dockerfile.worker -t allocation-key-generation-worker .
 `Dockerfile.production` construit l'image API de production. Dans la stack de
 développement du monorepo, l'API est accessible sur le port hôte **8002**.
 
+## Dimensionnement des ressources
+
+Le worker résout dans un pool de processus, un par CPU attribué moins un (les
+fichiers compose lui donnent 2 CPU, donc un processus de résolution). Le coût
+d'une génération croît avec **participants × pas de temps**, la taille de sa
+matrice de consommation ; une série au quart d'heure compte 96 pas par jour.
+
+Processus de résolution d'OLAGSA, mesuré avec cvxpy 1.6.3 dans l'image du worker
+sur un CPU :
+
+| Participants × pas de temps | Par exemple | Mémoire maximale | Une résolution |
+|---|---|---|---|
+| 176 640 | 20 compteurs × 92 jours | 0,5 Go | 2,5 s |
+| 353 280 | 20 compteurs × 184 jours | 0,85 Go | 5,5 s |
+| 706 560 | 40 compteurs × 184 jours | 1,5 Go | 10,5 s |
+
+Une génération résout quelques centaines de fois : 208 résolutions et 9 minutes
+pour 20 compteurs × 92 jours avec les hyperparamètres par défaut et 2 itérations.
+La taille de population et le nombre de générations changent la durée, pas la
+mémoire maximale.
+
+- **Limite.** Une génération au-delà de **400 000** participants × pas de temps
+  (environ 1 Go par processus de résolution) est refusée avec l'erreur 2024 :
+  par l'aperçu CRM et `POST /from-crm` (parmi les autres blocages), par `POST /`
+  pour un fichier envoyé, puis par le worker une fois les données lues. Cela
+  correspond à 20 compteurs sur 208 jours au plus, ou 10 compteurs sur un an. La
+  valeur se trouve dans `shared/problem_size.py` ; ne l'augmentez qu'avec la
+  mémoire du worker.
+- **Mémoire du conteneur.** Prévoyez pour le worker environ 0,3 Go plus 1 Go par
+  processus de résolution. Les fichiers compose du monorepo et de production
+  fixent `mem_limit: 2g` pour un processus. Sans limite, un processus qui dépasse
+  la mémoire de l'hôte est tué (OOM) et d'autres conteneurs peuvent tomber
+  aussi.
+- **Plantages du solveur.** Un processus de résolution tué faute de mémoire (ou
+  qui plante) casse tout le pool : chaque génération en cours de résolution à ce
+  moment échoue avec lui. Chacune est redistribuée ; un plantage à partir de la
+  troisième distribution d'une génération la marque en échec avec
+  `solver_crashed (likely out of memory)`. Une génération simplement trop grande
+  pour le conteneur s'exécute donc jusqu'à trois fois.
+- **brute_force** ne garde en mémoire que les séries temporelles des quelques
+  itérations en cours de calcul, et non celles de chaque clé candidate. Avec
+  20 compteurs, 3 itérations (1 782 clés) culminent à 0,09 Go pour 31 jours,
+  0,12 Go pour 92 jours et 0,21 Go à la limite ci-dessus (208 jours), en 25 s,
+  70 s et 2,7 minutes, passées surtout dans la répartition `prorata`. 1 ou
+  2 itérations culminent plus bas et se terminent en 8 s au plus.
+- **Exécutions longues.** Une génération peut durer bien au-delà des 10 minutes
+  d'`ack_wait` de JetStream (`worker/dispatcher.py`) : pendant son traitement, y
+  compris pendant qu'elle attend un processus de résolution libre, le worker
+  envoie chaque minute un acquittement « en cours ». Elle n'est redistribuée que
+  lorsque ceux-ci s'arrêtent, 10 minutes après le dernier : le worker a planté,
+  a perdu NATS, ou a été arrêté en pleine exécution.
+
 ## Tests et qualité
 
 ```bash

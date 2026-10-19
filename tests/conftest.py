@@ -158,12 +158,13 @@ def apply_schema(test_db_ready):
 @pytest.fixture(scope="session", autouse=True)
 def _register_algorithms():
     from algorithms import autodiscover
-    from algorithms.registry import registry
 
-    # autodiscover raises ValueError on duplicate metadata; guard against
-    # being called twice (e.g., when conftest is reloaded).
-    if "brute_force" not in registry:
-        autodiscover()
+    # Always call it. A test module that imports one algorithm at collection
+    # (tests/algorithms/test_brute_force.py) registers that one alone, so
+    # "brute_force is registered" no longer means autodiscover ran. Calling it
+    # again is harmless: an already imported package is not executed twice,
+    # so its metadata is not registered twice.
+    autodiscover()
     return
 
 

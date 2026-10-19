@@ -9,37 +9,56 @@ from .solution import Solution
 
 
 class WarmStartSolver:
-    """Warm-started convex solver for a single OLAGSA iteration.
+    """Convex solver for a single OLAGSA iteration.
 
     Minimises the total surplus ``sum(E)`` where ``E = max(VAPA - C, 0)``,
-    subject to ``trace(VAP) == 1`` and ``VAP[i,i] >= 0``. The problem is
-    built once and re-solved with updated ``VA`` / ``C`` parameters,
-    using CVXPY warm-start to cut iteration cost.
+    subject to ``sum(p) == 1`` and ``p[i] >= 0``, with
+    ``VAPA[i, t] = p[i] * va[t]``. ``VA`` is always one production profile
+    tiled across the consumer rows (``shared.data_loading`` builds it with
+    ``np.tile``, and so does the surplus carry below), so the allocation is a
+    vector times a single ``(1, T)`` row rather than a diagonal matrix times
+    the whole ``(n, T)`` tile. ``_solve`` refuses a ``VA`` that is not tiled.
+
+    The problem is built once and re-solved with new ``VA`` / ``C`` values,
+    but compiled with ``ignore_dpp=True``. Under DPP, cvxpy's compile cost
+    grows with (parameter entries x variables), and ``C`` alone holds n*T
+    entries: 20 meters over 92 days of quarter-hours reserved ~130 GB of
+    address space and got the solver process OOM-killed during the first
+    solve. A plain recompile per solve stays linear in n*T. The LP handed to
+    the solver is the same as before: allocations differ from the former
+    ``diag(VAP) @ VA`` formulation only by float rounding (1e-14 to 3e-10
+    measured), inside the solver's own 1e-8 tolerance.
     """
 
     def __init__(self, c_shape: tuple[int, ...], va_shape: tuple[int, ...], max_iter: int) -> None:
+        num_consumers, horizon = c_shape
+        if tuple(va_shape) != (num_consumers, horizon):
+            raise ValueError(f"VA shape {va_shape} does not match C shape {c_shape}")
         self.max_iter = max_iter
-        self.VAP = cp.Variable((c_shape[0], c_shape[0]), diag=True)
-        self.VA = cp.Parameter((va_shape[0], va_shape[1]), nonneg=True)
-        self.C = cp.Parameter((c_shape[0], c_shape[1]), nonneg=True)
-        self.VAPA = self.VAP @ self.VA
+        self.p = cp.Variable(num_consumers)
+        self.va = cp.Parameter((1, horizon), nonneg=True)
+        self.C = cp.Parameter((num_consumers, horizon), nonneg=True)
+        self.VAPA = cp.reshape(self.p, (num_consumers, 1), order="F") @ self.va
 
-        constraints = [cp.trace(self.VAP) == 1]
-        for i in range(c_shape[0]):
-            constraints.append(self.VAP[i, i] >= 0)
+        constraints = [cp.sum(self.p) == 1]
+        for i in range(num_consumers):
+            constraints.append(self.p[i] >= 0)
 
         self.E = ((self.VAPA - self.C) + cp.abs(self.VAPA - self.C)) / 2
         self.problem = cp.Problem(cp.Minimize(cp.sum(self.E)), constraints)
 
     def _solve(self, VA: np.ndarray, C: np.ndarray) -> Solution:
-        self.VA.value = VA
+        if not np.array_equal(VA, np.broadcast_to(VA[:1], VA.shape)):
+            raise ValueError("VA must repeat one production profile on every consumer row")
+        self.va.value = VA[:1]
         self.C.value = C
-        self.problem.solve(max_iter=self.max_iter, warm_start=True)
+        self.problem.solve(max_iter=self.max_iter, warm_start=True, ignore_dpp=True)
         # cvxpy declares .value as ndarray | None; populated after a feasible
         # solve. Callers gate further use on Solution.status == "optimal".
+        p = self.p.value
         return Solution(
             self.problem.status,
-            cast(np.ndarray, self.VAP.value),
+            cast(np.ndarray, None if p is None else np.diag(p)),
             VA,
             C,
             cast(np.ndarray, self.VAPA.value),

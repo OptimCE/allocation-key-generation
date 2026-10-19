@@ -10,6 +10,7 @@ import datetime
 from shared.crm_meter_repository import CrmDataSummary, EanCoverage
 from shared.crm_preflight import MAX_READING_ROWS, evaluate
 from shared.custom_errors import errors
+from shared.problem_size import MAX_PROBLEM_CELLS
 
 
 def _coverage(
@@ -107,6 +108,51 @@ def test_oversized_period_blocks():
         )
     )
     assert errors.generation.CRM_RANGE_TOO_LARGE.code in _codes(result)
+
+
+def _participants_on_grid(count: int, grid_size: int) -> CrmDataSummary:
+    meters = [
+        _coverage(f"M{i}", row_count=grid_size, distinct_ts=grid_size, injection_kwh=1.0)
+        for i in range(count)
+    ]
+    return _summary(meters, grid_size=grid_size)
+
+
+def test_more_participant_values_than_the_solver_can_hold_block():
+    # Two participants on a grid one step past half the limit: 2 values over it.
+    result = evaluate(_participants_on_grid(2, MAX_PROBLEM_CELLS // 2 + 1))
+
+    assert _codes(result) == {errors.generation.PROBLEM_TOO_LARGE.code}
+    assert "exceed" in result.blockers[0].detail
+
+
+def test_participant_values_at_the_solver_limit_are_accepted():
+    result = evaluate(_participants_on_grid(2, MAX_PROBLEM_CELLS // 2))
+
+    assert result.ok
+
+
+def test_injection_only_meters_do_not_count_towards_the_solver_limit():
+    # The PV site is summed into the one production profile; only the single
+    # participant becomes a solver row, so this sits exactly at the limit.
+    grid = MAX_PROBLEM_CELLS
+    result = evaluate(
+        _summary(
+            [
+                _coverage("A", row_count=grid, distinct_ts=grid),
+                _coverage(
+                    "PV",
+                    row_count=grid,
+                    distinct_ts=grid,
+                    consumption_kwh=0.0,
+                    injection_kwh=50.0,
+                ),
+            ],
+            grid_size=grid,
+        )
+    )
+
+    assert result.ok
 
 
 # ---------------------------------------------------------------------------

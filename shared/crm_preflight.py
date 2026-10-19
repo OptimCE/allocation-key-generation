@@ -13,12 +13,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.errors.errors import Error
+from shared import problem_size
 from shared.crm_meter_repository import CrmDataSummary
 from shared.custom_errors import errors
 
 # A year of quarter-hours across ~60 meters is ~2.1 M rows, which the worker
 # pivots comfortably. Well past that we would rather refuse than risk the
 # worker being OOM-killed mid-run, which reads to the manager as a silent hang.
+# This only bounds the read and the pivot: the solver's own limit on
+# participants x timesteps (problem_size.MAX_PROBLEM_CELLS) is far tighter.
 MAX_READING_ROWS = 5_000_000
 
 
@@ -98,6 +101,13 @@ def evaluate(summary: CrmDataSummary) -> Preflight:
                 detail="no meter drew any energy over this period",
             )
         )
+    else:
+        # The solver sees one row per participant and one column per timestamp
+        # of the common grid; injection-only meters are summed into a single
+        # production profile and add nothing.
+        oversize = problem_size.too_large(len(consumer_eans), summary.grid_size)
+        if oversize:
+            blockers.append(Blocker(error=errors.generation.PROBLEM_TOO_LARGE, detail=oversize))
 
     if summary.total_injection_kwh <= 0:
         blockers.append(

@@ -50,6 +50,10 @@ class _GenerationErrors:
     CRM_RANGE_TOO_LARGE = Error(code=2022, key="ERRORS.GENERATION.CRM_RANGE_TOO_LARGE")
     GET_CRM_PREVIEW = Error(code=2023, key="ERRORS.GENERATION.GET_CRM_PREVIEW")
 
+    # Participants x timesteps beyond what one solver process may hold in memory
+    # (shared/problem_size.py). Either source: CRM pre-flight or file upload.
+    PROBLEM_TOO_LARGE = Error(code=2024, key="ERRORS.GENERATION.PROBLEM_TOO_LARGE")
+
 
 class _Errors:
     auth = _AuthErrors()

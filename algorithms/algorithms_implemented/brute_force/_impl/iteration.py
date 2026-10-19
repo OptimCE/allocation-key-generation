@@ -1,6 +1,17 @@
+from dataclasses import dataclass
+
 import numpy as np
 
 from .consumer import Consumer
+
+
+@dataclass(frozen=True)
+class IterationSummary:
+    """The figures a key reports for one iteration, without its time series."""
+
+    energy_allocated_percentage: float
+    surplus_total: float
+    consumer_percentages: tuple[float, ...]
 
 
 class Iteration:
@@ -34,6 +45,32 @@ class Iteration:
 
     def compute_surplus_total(self) -> None:
         self.surplus_total = float(sum(c.surplus_total for c in self.consumers))
+
+    def summary(self) -> IterationSummary:
+        """Collapse this iteration to the figures its key reports.
+
+        For ``prorata`` (time-varying) consumers the percentage is recorded as
+        ``-1``; it is collapsed back to a scalar by taking the time-averaged
+        share of the iteration's total available energy.
+        """
+        profile = np.asarray(self.energy_allocated[0])
+        total_profile = float(np.sum(profile)) if profile.size else 0.0
+
+        percentages: list[float] = []
+        for c in self.consumers:
+            if c.energy_allocated_percentage >= 0:
+                pct = float(c.energy_allocated_percentage)
+            elif total_profile > 0:
+                pct = float(np.sum(c.energy_allocated)) / total_profile
+            else:
+                pct = 0.0
+            percentages.append(pct)
+
+        return IterationSummary(
+            energy_allocated_percentage=float(self.energy_allocated_percentage),
+            surplus_total=float(self.surplus_total),
+            consumer_percentages=tuple(percentages),
+        )
 
     def copy(self) -> "Iteration":
         new = Iteration(

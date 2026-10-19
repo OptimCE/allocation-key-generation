@@ -6,6 +6,10 @@ with the following intentional changes:
 - Bug fix: species id assignment now uses a properly-incremented counter
   (the former code used the Python expression ``++self.last_id_specie``
   which is a no-op, so all species received id 0 when num_key_iteration == 2).
+- Bug fix: a single-iteration key is solved directly in ``run``. The former
+  trivial species branch ran after the population was already built, so the
+  1-gene chromosomes still reached the 2-D/3-D species assignment
+  (``IndexError``).
 - Class naming and API adapted to the new algorithms package conventions.
 - Decoupled from the old file-loading path: takes pre-parsed ``C``, ``VA``,
   and ``consumer_names`` as inputs.
@@ -120,16 +124,6 @@ class OlagsaGA:
     def _initialize_species(self) -> list[Specie]:
         species: list[Specie] = []
 
-        if self.num_key_iteration == 1:
-            # Trivial case: single iteration, single species, single individual.
-            self.num_generation = 1
-            self.species_waited = 1
-            self.population_size = 1
-            s = Specie(self._next_specie_id(), [])
-            s.is_same_specie = lambda _x: True
-            species.append(s)
-            return species
-
         if self.num_key_iteration == 2:
             segments = self._build_segments(self._find_midpoints(self.species_waited))
             for seg in segments:
@@ -161,7 +155,7 @@ class OlagsaGA:
 
         raise ValueError(
             f"Unsupported num_key_iteration={self.num_key_iteration} "
-            "(only 1, 2, or 3 iterations are supported)."
+            "(species are defined for 2 or 3 iterations; run() solves 1 directly)."
         )
 
     # Helpers avoid late-binding closure gotcha without relying on default args.
@@ -318,6 +312,14 @@ class OlagsaGA:
         self._C = C
         self._VA = VA
         self._solver = WarmStartSolver(C.shape, VA.shape, self.SOLVER_MAX_ITER)
+
+        if self.num_key_iteration == 1:
+            # The only gene is the share of production the iteration gets,
+            # always 100 %, so every candidate would be [1.0]. The species
+            # space is undefined for one dimension; solve that key directly.
+            only = self._evaluate(Individual([1.0], 0.0))
+            key = self._solver.solve_key(1, C, VA, only.chromosomes)
+            return [BestSolution(only, only.fitness, key)]
 
         population = [self._evaluate(ind) for ind in self._initialize_population()]
         species = self._assign_species(population, self._initialize_species())

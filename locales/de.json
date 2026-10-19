@@ -35,7 +35,8 @@
       "CRM_NO_INJECTION": "In diesem Zeitraum wurde nichts eingespeist, es gibt also nichts zu teilen (Code: 2020)",
       "CRM_NO_CONSUMERS": "Kein Zähler hat in diesem Zeitraum Energie bezogen (Code: 2021)",
       "CRM_RANGE_TOO_LARGE": "Der gewählte Zeitraum enthält zu viele Messwerte, bitte kürzen Sie ihn (Code: 2022)",
-      "GET_CRM_PREVIEW": "Die Messdaten konnten nicht geprüft werden (Code: 2023)"
+      "GET_CRM_PREVIEW": "Die Messdaten konnten nicht geprüft werden (Code: 2023)",
+      "PROBLEM_TOO_LARGE": "Zu viele Daten für eine einzelne Generierung (Teilnehmer × Zeitschritte), bitte kürzen Sie den Zeitraum oder verringern Sie die Anzahl der Teilnehmer (Code: 2024)"
     }
   },
   "ALGORITHMS": {
@@ -50,7 +51,7 @@
     "OLAGSA": {
       "ITERATIONS": {
         "TITLE": "Anzahl der Iterationen",
-        "DESCRIPTION": "Anzahl der Iterationen des genetischen Algorithmus."
+        "DESCRIPTION": "Anzahl der Iterationen des erzeugten Verteilungsschlüssels. Muss 1, 2 oder 3 sein. Bei 1 Iteration wird die gesamte Produktion in einem Durchgang verteilt, und die erweiterten Optionen haben keine Wirkung."
       },
       "GENERATIONS": {
         "TITLE": "Anzahl der Generationen",

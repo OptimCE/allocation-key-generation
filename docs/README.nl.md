@@ -200,6 +200,56 @@ docker build -f Dockerfile.worker -t allocation-key-generation-worker .
 `Dockerfile.production` bouwt de productie-API-image. In de
 ontwikkelingsstack van de monorepo is de API bereikbaar op hostpoort **8002**.
 
+## Dimensionering van middelen
+
+De worker lost op in een pool van processen, één per toegewezen CPU min één (de
+compose-bestanden geven hem 2 CPU's, dus één solverproces). Wat een generatie
+kost, groeit met **deelnemers × tijdstappen**, de grootte van haar
+verbruiksmatrix; een kwartierreeks telt 96 tijdstappen per dag.
+
+Solverproces van OLAGSA, gemeten met cvxpy 1.6.3 in de worker-image op één CPU:
+
+| Deelnemers × tijdstappen | Bijvoorbeeld | Piekgeheugen | Eén oplossing |
+|---|---|---|---|
+| 176.640 | 20 meters × 92 dagen | 0,5 GB | 2,5 s |
+| 353.280 | 20 meters × 184 dagen | 0,85 GB | 5,5 s |
+| 706.560 | 40 meters × 184 dagen | 1,5 GB | 10,5 s |
+
+Een generatie lost enkele honderden keren op: 208 oplossingen en 9 minuten voor
+20 meters × 92 dagen met de standaardhyperparameters en 2 iteraties.
+Populatiegrootte en aantal generaties veranderen de looptijd, niet het
+piekgeheugen.
+
+- **Limiet.** Een generatie boven **400.000** deelnemers × tijdstappen (ongeveer
+  1 GB per solverproces) wordt geweigerd met fout 2024: door de CRM-voorvertoning
+  en `POST /from-crm` (bij de andere blokkeringen), door `POST /` voor een
+  geüpload bestand, en opnieuw door de worker zodra de gegevens ingelezen zijn.
+  Dat is 20 meters voor hoogstens 208 dagen, of 10 meters voor een jaar. De
+  waarde staat in `shared/problem_size.py`; verhoog ze alleen samen met het
+  geheugen van de worker.
+- **Containergeheugen.** Geef de worker ongeveer 0,3 GB plus 1 GB per
+  solverproces. De compose-bestanden van de monorepo en van productie zetten
+  `mem_limit: 2g` voor één. Zonder limiet wordt een solver die het geheugen van
+  de host ontgroeit door OOM beëindigd, en kunnen andere containers meegaan.
+- **Solvercrashes.** Een solverproces dat wegens geheugengebrek wordt beëindigd
+  (of crasht) breekt de hele pool: elke generatie die op dat moment wordt
+  opgelost, faalt mee. Elke generatie wordt opnieuw afgeleverd; een crash vanaf
+  de derde aflevering van een generatie markeert ze als mislukt met
+  `solver_crashed (likely out of memory)`. Een generatie die gewoon te groot is
+  voor de container, draait dus tot drie keer.
+- **brute_force** houdt alleen de tijdreeksen in het geheugen van de paar
+  iteraties die hij aan het berekenen is, niet die van elke kandidaat-sleutel.
+  Met 20 meters pieken 3 iteraties (1.782 sleutels) op 0,09 GB voor 31 dagen,
+  0,12 GB voor 92 dagen en 0,21 GB bij de limiet hierboven (208 dagen), in 25 s,
+  70 s en 2,7 minuten, vooral in de verdeling `prorata`. 1 of 2 iteraties
+  pieken lager en zijn binnen 8 s klaar.
+- **Lange runs.** Een generatie mag veel langer lopen dan de `ack_wait` van 10
+  minuten van JetStream (`worker/dispatcher.py`): zolang ze verwerkt wordt, ook
+  terwijl ze op een vrij solverproces wacht, stuurt de worker elke minuut een
+  in-progress-bevestiging. Ze wordt pas opnieuw afgeleverd als die uitblijven,
+  10 minuten na de laatste: de worker is gecrasht, heeft NATS verloren of werd
+  midden in de run gestopt.
+
 ## Tests en kwaliteit
 
 ```bash

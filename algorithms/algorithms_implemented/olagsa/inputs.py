@@ -10,6 +10,7 @@ class OlagsaInput(AlgorithmInput):
         title="PARAMETERS.OLAGSA.ITERATIONS.TITLE",
         description="PARAMETERS.OLAGSA.ITERATIONS.DESCRIPTION",
         ge=1,
+        le=3,
         json_schema_extra={"ui:section": "main"},
     )
 

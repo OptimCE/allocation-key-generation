@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import numpy as np
 import pytest
 from pydantic import Field
 from sqlalchemy.exc import OperationalError
@@ -41,6 +42,7 @@ from algorithms.base import (
 )
 from core.queue.helper import Event
 from shared.const import DataSource, GenerationStatus
+from shared.problem_size import MAX_PROBLEM_CELLS
 from worker import dispatcher
 
 # ---------------------------------------------------------------------------
@@ -159,10 +161,15 @@ def stub_io(monkeypatch, patched_storage):
     """Default-success patches for download and parse so each test only
     needs to override the specific step it's exercising.
     """
+    # Real (tiny) matrices: the dispatcher reads their shape before solving.
     monkeypatch.setattr(
         dispatcher.data_loading,
         "load",
-        MagicMock(return_value=AlgorithmRawData(C=None, VA=None, consumer_names=[])),
+        MagicMock(
+            return_value=AlgorithmRawData(
+                C=np.zeros((1, 4)), VA=np.ones((1, 4)), consumer_names=["a"]
+            )
+        ),
     )
 
 
@@ -250,6 +257,56 @@ async def test_handler_calls_save_failure_when_algorithm_raises(
     args, _kwargs = save_failure.await_args
     assert args[0] == 42
     assert args[1].startswith("algorithm_failed:")
+    delete.assert_awaited_once_with(_TEST_STORAGE_KEY)
+
+
+# ---------------------------------------------------------------------------
+# Input too large to solve — deterministic, mark FAILED before the solver runs
+# ---------------------------------------------------------------------------
+
+
+async def test_handler_fails_an_oversized_input_without_running_the_algorithm(
+    monkeypatch, patched_save, patched_storage
+):
+    """The upload route's count is approximate, so the parsed shape is re-checked.
+
+    Two participants, one timestep past half the limit: the worker must refuse
+    it before handing the matrices to a solver process.
+    """
+    save_success, save_failure = patched_save
+    _download, delete = patched_storage
+    timesteps = MAX_PROBLEM_CELLS // 2 + 1
+    monkeypatch.setattr(
+        dispatcher.data_loading,
+        "load",
+        MagicMock(
+            return_value=AlgorithmRawData(
+                C=np.zeros((2, timesteps)), VA=np.zeros((2, timesteps)), consumer_names=["a", "b"]
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        dispatcher,
+        "_snapshot_generation",
+        AsyncMock(return_value=_make_snapshot(generation_id=43)),
+    )
+    implementation = MagicMock(side_effect=AssertionError("the algorithm must not run"))
+    monkeypatch.setattr("algorithms.registry.registry.implementation", implementation)
+
+    handler = dispatcher._make_handler(_make_meta())
+    msg = FakeMsg(_make_event_bytes(generation_id=43))
+
+    await handler(msg)
+
+    assert msg.acked is True
+    assert msg.naked is False
+    implementation.assert_not_called()
+    save_success.assert_not_awaited()
+    save_failure.assert_awaited_once()
+    args, _kwargs = save_failure.await_args
+    assert args[0] == 43
+    assert args[1].startswith("problem_too_large:")
+    assert f"2 participants x {timesteps} timesteps" in args[1]
     delete.assert_awaited_once_with(_TEST_STORAGE_KEY)
 
 
