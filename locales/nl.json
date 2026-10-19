@@ -51,7 +51,7 @@
     "OLAGSA": {
       "ITERATIONS": {
         "TITLE": "Aantal iteraties",
-        "DESCRIPTION": "Aantal iteraties van het genetisch algoritme."
+        "DESCRIPTION": "Aantal iteraties van de gegenereerde verdeelsleutel. Moet 1, 2 of 3 zijn. Met 1 iteratie wordt alle productie in één keer verdeeld en hebben de geavanceerde opties geen effect."
       },
       "GENERATIONS": {
         "TITLE": "Aantal generaties",

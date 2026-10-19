@@ -419,6 +419,29 @@ async def test_start_generation_invalid_inputs_returns_422_with_2012(
     mock_upload.assert_not_awaited()
 
 
+@patch("api.generation.service.storage.delete", new_callable=AsyncMock)
+@patch("api.generation.service.storage.upload", new_callable=AsyncMock)
+@patch("api.generation.service.get_jetstream", return_value=MagicMock())
+@patch("api.generation.service.send_event", new_callable=AsyncMock)
+async def test_start_generation_olagsa_four_iterations_returns_422_with_2012(
+    mock_send, mock_jetstream, mock_upload, mock_delete, client, db_session
+):
+    """A key has at most 3 iterations. OLAGSA used to accept 4 and fail in
+    the worker after evaluating its whole initial population."""
+    community = await _community_with_subscription(db_session)
+
+    response = await client.post(
+        "/",
+        headers=_admin_headers(community),
+        **_multipart_payload(algorithm_name="olagsa", inputs={"iterations": 4}),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error_code"] == 2012
+    mock_send.assert_not_awaited()
+    mock_upload.assert_not_awaited()
+
+
 async def test_start_generation_malformed_inputs_json_returns_422(client, db_session):
     """A non-JSON or non-object ``inputs`` form field is a 422 with the
     INVALID_ALGORITHM_INPUTS code, surfaced by the route before any

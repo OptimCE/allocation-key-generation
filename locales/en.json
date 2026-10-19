@@ -51,7 +51,7 @@
     "OLAGSA": {
       "ITERATIONS": {
         "TITLE": "Number of iterations",
-        "DESCRIPTION": "Number of iterations of the genetic algorithm."
+        "DESCRIPTION": "Number of iterations in the generated allocation key. Must be 1, 2, or 3. With 1 iteration all the production is shared in a single pass, so the advanced options have no effect."
       },
       "GENERATIONS": {
         "TITLE": "Number of generations",

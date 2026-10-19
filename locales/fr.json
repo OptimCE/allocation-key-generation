@@ -51,7 +51,7 @@
     "OLAGSA": {
       "ITERATIONS": {
         "TITLE": "Nombre d'itérations",
-        "DESCRIPTION": "Nombre d'itérations de l'algorithme génétique."
+        "DESCRIPTION": "Nombre d'itérations de la clé de répartition générée. Doit être 1, 2 ou 3. Avec 1 itération, toute la production est partagée en une seule passe et les options avancées n'ont aucun effet."
       },
       "GENERATIONS": {
         "TITLE": "Nombre de générations",

@@ -51,7 +51,7 @@
     "OLAGSA": {
       "ITERATIONS": {
         "TITLE": "Anzahl der Iterationen",
-        "DESCRIPTION": "Anzahl der Iterationen des genetischen Algorithmus."
+        "DESCRIPTION": "Anzahl der Iterationen des erzeugten Verteilungsschlüssels. Muss 1, 2 oder 3 sein. Bei 1 Iteration wird die gesamte Produktion in einem Durchgang verteilt, und die erweiterten Optionen haben keine Wirkung."
       },
       "GENERATIONS": {
         "TITLE": "Anzahl der Generationen",
