@@ -68,6 +68,20 @@ _HEARTBEAT_PATH = pathlib.Path("/tmp/worker.alive")  # noqa: S108 — dedicated 
 # so we don't get SIGKILL'd mid-drain.
 _INFLIGHT_DRAIN_TIMEOUT_SECONDS = 25
 
+# Each solver process raises its own OOM score to the maximum (Linux only), so
+# that when the container reaches its memory limit the kernel kills a solver
+# process rather than this one. A dead solver process is a BrokenProcessPool
+# the dispatcher retries a bounded number of times
+# (dispatcher._MAX_SOLVER_CRASH_DELIVERIES). A dead main process takes the
+# worker down, its in-progress acks stop, and its message comes back after
+# ack_wait, a whole run lost each time, until dispatcher._MAX_DELIVERIES stops
+# it. Raising the score needs no privilege; lowering it would.
+_OOM_SCORE_ADJ_PATH = pathlib.Path("/proc/self/oom_score_adj")
+_SOLVER_OOM_SCORE_ADJ = 1000
+# Where a failed write means the protection above is missing (Linux), rather
+# than that there is no /proc to write to (dev on Windows or macOS).
+_OOM_SCORE_ADJ_EXPECTED = sys.platform.startswith("linux")
+
 
 def _detect_available_cpus() -> int:
     """Best-effort count of CPUs this process is actually allowed to use.
@@ -119,8 +133,35 @@ def _init_solver_process() -> None:
     Each ProcessPoolExecutor worker is a fresh interpreter with an empty
     registry, so load the algorithm implementations here. This also pays the
     heavy numpy/cvxpy import cost once per worker rather than per solve.
+
+    First, it makes this process the kernel's first choice for an OOM kill
+    (``_raise_oom_score``), so that the imports are covered as well.
     """
+    _raise_oom_score()
     autodiscover(load_implementations=True)
+
+
+def _raise_oom_score() -> None:
+    """Write ``_SOLVER_OOM_SCORE_ADJ`` to ``_OOM_SCORE_ADJ_PATH``, best-effort.
+
+    A solver process that cannot raise its score still solves; the kernel then
+    picks its victim by size alone. Called once per solver process, so a
+    failure is logged once per process: as a warning on Linux, where the
+    worker's main process can then be the one killed, and at debug level
+    where there is no /proc.
+    """
+    try:
+        _OOM_SCORE_ADJ_PATH.write_text(f"{_SOLVER_OOM_SCORE_ADJ}\n")
+    except OSError as exc:
+        logger.log(
+            logging.WARNING if _OOM_SCORE_ADJ_EXPECTED else logging.DEBUG,
+            "Could not raise the OOM score of solver process %d (%s): %s. "
+            "If the container runs out of memory, the kernel may kill the "
+            "worker's main process instead.",
+            os.getpid(),
+            _OOM_SCORE_ADJ_PATH,
+            exc,
+        )
 
 
 class _SolverPool(Executor):

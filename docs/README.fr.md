@@ -234,7 +234,13 @@ mémoire maximale.
   processus de résolution. Les fichiers compose du monorepo et de production
   fixent `mem_limit: 2g` pour un processus. Sans limite, un processus qui dépasse
   la mémoire de l'hôte est tué (OOM) et d'autres conteneurs peuvent tomber
-  aussi.
+  aussi. Chaque processus de résolution se désigne comme premier choix du noyau
+  quand le conteneur manque de mémoire (`oom_score_adj` 1000) : la résolution
+  échoue et est retentée comme ci-dessous. Un processus principal tué arrêterait
+  au contraire tout le worker, et ses générations reviendraient toutes les
+  10 minutes jusqu'à la limite de distributions ci-dessous. Un processus de
+  résolution qui ne
+  peut pas relever son score émet un avertissement à son démarrage.
 - **Plantages du solveur.** Un processus de résolution tué faute de mémoire (ou
   qui plante) casse tout le pool : chaque génération en cours de résolution à ce
   moment échoue avec lui. Chacune est redistribuée ; un plantage à partir de la
@@ -253,6 +259,16 @@ mémoire maximale.
   envoie chaque minute un acquittement « en cours ». Elle n'est redistribuée que
   lorsque ceux-ci s'arrêtent, 10 minutes après le dernier : le worker a planté,
   a perdu NATS, ou a été arrêté en pleine exécution.
+- **Limite de distributions.** Une génération dont les distributions finissent
+  sans résultat est marquée en échec avec `delivery_limit_reached` à sa
+  10e distribution, sans être exécutée à nouveau. Cela couvre les échecs
+  transitoires (stockage objet ou base CRM injoignable, retentés toutes les
+  30 secondes : les 9 premières distributions tiennent donc environ quatre
+  minutes et demie de panne) et un worker mort ou redémarré en pleine exécution.
+  Le `max_deliver` des consommateurs vaut 11, un garde-fou que le worker
+  applique aux consommateurs existants à son démarrage : JetStream y arrête un
+  message même si son échec n'a pas pu être enregistré, et la génération reste
+  alors en attente.
 
 ## Tests et qualité
 

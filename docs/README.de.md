@@ -233,7 +233,13 @@ Populationsgröße und Generationen ändern die Laufzeit, nicht den Spitzenspeic
   Solver-Prozess. Die Compose-Dateien des Monorepos und der Produktion setzen
   `mem_limit: 2g` für einen. Ohne Grenze wird ein Solver, der über den Speicher
   des Hosts hinauswächst, per OOM beendet, und andere Container können
-  mitgerissen werden.
+  mitgerissen werden. Jeder Solver-Prozess macht sich zur ersten Wahl des
+  Kernels, wenn dem Container der Speicher ausgeht (`oom_score_adj` 1000): Die
+  Lösung scheitert und wird wie unten beschrieben wiederholt. Ein beendeter
+  Hauptprozess würde dagegen den ganzen Worker stoppen, und seine Erzeugungen
+  kämen alle 10 Minuten zurück, bis zur unten beschriebenen Zustellgrenze. Ein
+  Solver-Prozess, der seinen Wert nicht erhöhen kann, protokolliert beim Start
+  eine Warnung.
 - **Solver-Abstürze.** Ein Solver-Prozess, der wegen Speichermangels beendet
   wird (oder abstürzt), bricht den ganzen Pool: jede Erzeugung, die in diesem
   Moment gelöst wird, scheitert mit ihm. Jede wird erneut zugestellt; ein
@@ -252,6 +258,16 @@ Populationsgröße und Generationen ändern die Laufzeit, nicht den Spitzenspeic
   Worker jede Minute eine In-Progress-Bestätigung. Erneut zugestellt wird sie
   erst, wenn diese ausbleiben, 10 Minuten nach der letzten: der Worker ist
   abgestürzt, hat NATS verloren oder wurde mitten im Lauf beendet.
+- **Zustellgrenze.** Eine Erzeugung, deren Zustellungen immer wieder ohne
+  Ergebnis enden, wird bei ihrer 10. Zustellung mit `delivery_limit_reached`
+  als fehlgeschlagen markiert, ohne erneut zu laufen. Das betrifft
+  vorübergehende Fehler (Objektspeicher oder CRM-Datenbank nicht erreichbar,
+  alle 30 Sekunden wiederholt, sodass die ersten 9 Zustellungen etwa
+  viereinhalb Minuten Ausfall überbrücken) und einen Worker, der mitten im Lauf
+  gestorben ist oder neu gestartet wurde. Das `max_deliver` der Consumer ist 11,
+  eine Absicherung, die der Worker beim Start auf bestehende Consumer anwendet:
+  JetStream stoppt eine Nachricht dort, auch wenn ihr Fehlschlag nicht
+  gespeichert werden konnte, und die Erzeugung bleibt dann ausstehend.
 
 ## Tests und Qualität
 

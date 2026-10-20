@@ -220,7 +220,12 @@ generations change the run time, not the peak memory.
 - **Container memory.** Give the worker about 0.3 GB plus 1 GB per solver
   process. The monorepo and production compose files set `mem_limit: 2g` for
   one. Without a limit, a solver that outgrows the host is OOM-killed and other
-  containers may go too.
+  containers may go too. Each solver process makes itself the kernel's first
+  choice when the container runs out of memory (`oom_score_adj` 1000), so the
+  solve fails and is retried as below. A killed main process would take the
+  whole worker down instead, and its generations would come back every 10
+  minutes until the delivery limit below. A solver process that cannot raise
+  its score logs a warning when it starts.
 - **Solver crashes.** A solver process killed for memory (or crashing) breaks
   the whole pool, so every generation solving at that moment fails with it. Each
   is delivered again; a crash on a generation's third delivery or later marks it
@@ -237,6 +242,15 @@ generations change the run time, not the peak memory.
   acknowledgement every minute. It is delivered again only once those stop, 10
   minutes after the last one: the worker crashed, lost NATS, or was shut down
   mid-run.
+- **Delivery limit.** A generation whose deliveries keep ending without a
+  result is marked failed with `delivery_limit_reached` on its 10th delivery,
+  without being run again. That covers transient failures (object storage or
+  the CRM database unreachable, retried every 30 seconds, so the first 9
+  deliveries ride out about four and a half minutes of outage) and a worker that
+  died or was restarted mid-run. The consumers' `max_deliver` is 11, a backstop
+  the worker applies to existing consumers when it starts: JetStream stops a
+  message there even if its failure could not be recorded, and its generation
+  then stays pending.
 
 ## Testing & Quality
 

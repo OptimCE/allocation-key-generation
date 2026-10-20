@@ -7,6 +7,8 @@ run several generations in parallel:
 * ``worker.main._detect_available_cpus`` / ``_solver_pool_size`` — sizing the
   pool from the CPUs the container is actually allowed to use (cgroup quota),
   not the host core count.
+* ``worker.main._init_solver_process`` — each solver process raises its own
+  OOM score, so the kernel kills it rather than the main process.
 * ``worker.dispatcher._run_algorithm`` / ``_run_algorithm_subprocess`` — the
   inline-vs-executor branch and the picklable subprocess entry point.
 * ``worker.dispatcher._make_handler`` spawning path — when an ``inflight`` set
@@ -15,16 +17,21 @@ run several generations in parallel:
 
 A ThreadPoolExecutor stands in for the ProcessPoolExecutor so the tests stay
 fast and cross-platform (no spawn/pickle round-trip); picklability of the
-payloads is asserted separately.
+payloads is asserted separately. Only the Linux OOM-score test starts a real
+solver process.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import pickle
+import sys
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import pytest
 from pydantic import Field
 
 from algorithms.base import (
@@ -186,6 +193,70 @@ def test_solver_pool_rebuilds_after_broken_worker(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# The solver process volunteers for the OOM killer
+# ---------------------------------------------------------------------------
+
+
+def _worker_main_records(caplog) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == worker_main.__name__]
+
+
+def test_solver_process_raises_its_oom_score(monkeypatch, tmp_path, caplog):
+    score = tmp_path / "oom_score_adj"
+    score.write_text("0\n")
+    monkeypatch.setattr(worker_main, "_OOM_SCORE_ADJ_PATH", score)
+
+    with caplog.at_level(logging.DEBUG, logger=worker_main.__name__):
+        worker_main._init_solver_process()
+
+    assert score.read_text() == "1000\n"
+    assert _worker_main_records(caplog) == []
+
+
+def test_solver_process_starts_where_there_is_no_oom_score(monkeypatch, tmp_path, caplog):
+    """Dev on Windows or macOS: no /proc, so nothing to warn about."""
+    monkeypatch.setattr(worker_main, "_OOM_SCORE_ADJ_PATH", tmp_path / "no-proc" / "oom_score_adj")
+    monkeypatch.setattr(worker_main, "_OOM_SCORE_ADJ_EXPECTED", False)
+
+    with caplog.at_level(logging.DEBUG, logger=worker_main.__name__):
+        worker_main._init_solver_process()
+
+    [record] = _worker_main_records(caplog)
+    assert record.levelno == logging.DEBUG
+
+
+def test_on_linux_a_solver_that_cannot_raise_its_oom_score_warns_once(
+    monkeypatch, tmp_path, caplog
+):
+    """The process still starts, but an OOM kill may now take the main process,
+    costing a whole run per delivery up to the delivery limit: worth one
+    warning."""
+    monkeypatch.setattr(worker_main, "_OOM_SCORE_ADJ_PATH", tmp_path / "no-proc" / "oom_score_adj")
+    monkeypatch.setattr(worker_main, "_OOM_SCORE_ADJ_EXPECTED", True)
+
+    with caplog.at_level(logging.DEBUG, logger=worker_main.__name__):
+        worker_main._init_solver_process()
+
+    [record] = _worker_main_records(caplog)
+    assert record.levelno == logging.WARNING
+    assert str(os.getpid()) in record.getMessage()
+    assert "main process" in record.getMessage()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="/proc/<pid>/oom_score_adj")
+def test_on_linux_only_the_solver_processes_volunteer():
+    pool = worker_main._SolverPool(1, worker_main._init_solver_process)
+    try:
+        solver_pid = pool.submit(os.getpid).result(timeout=60)
+        with open(f"/proc/{solver_pid}/oom_score_adj") as solver:
+            assert solver.read().strip() == "1000"
+        with open("/proc/self/oom_score_adj") as main:
+            assert main.read().strip() != "1000"
+    finally:
+        pool.shutdown(wait=True)
+
+
+# ---------------------------------------------------------------------------
 # Payload picklability — required to cross the process-pool boundary
 # ---------------------------------------------------------------------------
 
@@ -303,7 +374,7 @@ def _algorithms_js() -> FakeJetStream:
     return FakeJetStream({"ALGORITHMS": ["optimce.allocation.>"]})
 
 
-async def test_subscribe_sets_ack_wait_and_max_ack_pending():
+async def test_subscribe_sets_ack_wait_max_deliver_and_max_ack_pending():
     js = _algorithms_js()
     meta = _make_meta()
 
@@ -311,7 +382,21 @@ async def test_subscribe_sets_ack_wait_and_max_ack_pending():
 
     config = js.stored(meta.queue, f"worker-{meta.name}")
     assert config.ack_wait == dispatcher._ACK_WAIT_SECONDS
+    assert config.max_deliver == dispatcher._MAX_DELIVER
     assert config.max_ack_pending == 3
+
+
+async def test_subscribe_caps_the_deliveries_of_a_durable_an_earlier_build_created():
+    """The deployed durables have max_deliver -1 (unlimited), the broker's
+    default: the backstop has to reach them in place."""
+    js = _algorithms_js()
+    meta = _make_meta()
+    js.seed(meta.queue, f"worker-{meta.name}", ack_wait=float(dispatcher._ACK_WAIT_SECONDS))
+    assert js.stored(meta.queue, f"worker-{meta.name}").max_deliver == -1
+
+    await dispatcher.subscribe_algorithm(js, meta, max_ack_pending=1)
+
+    assert js.stored(meta.queue, f"worker-{meta.name}").max_deliver == dispatcher._MAX_DELIVER
 
 
 async def test_subscribe_updates_a_durable_an_earlier_build_created():
