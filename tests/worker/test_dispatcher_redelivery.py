@@ -13,6 +13,10 @@
 * **Shutdown.** The drain in ``worker.main`` cancels generations that outlast
   it; cancelling one stops its in-progress acks and settles nothing, so the
   message is redelivered once ack_wait runs out.
+* **The delivery limit.** Whatever the reason the earlier deliveries ended
+  without a result (NAKs, a worker that died), a generation on delivery
+  ``_MAX_DELIVERIES`` or later is marked FAILED without being run again, and
+  the broker's ``max_deliver`` is one higher.
 
 A ThreadPoolExecutor stands in for the solver process pool (a real one only
 where a process has to die), and the in-progress interval is shortened so a
@@ -23,6 +27,7 @@ until the test releases it, as a real solve blocks its process.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import multiprocessing
 import os
 import threading
@@ -555,3 +560,113 @@ async def test_an_algorithm_exception_in_the_pool_is_not_retried_like_a_crash(
 
     assert msg.events == ["ack"]
     save_failure.assert_awaited_once_with(23, "algorithm_failed: bad split")
+
+
+# ---------------------------------------------------------------------------
+# The delivery limit: a message that keeps coming back is FAILED
+# ---------------------------------------------------------------------------
+
+
+def _delivery_limit_reason(num_delivered: int) -> str:
+    return (
+        f"delivery_limit_reached: delivery {num_delivered}, the earlier ones ended without "
+        "a result (transient failures, or the worker stopped mid-run)"
+    )
+
+
+@pytest.mark.parametrize(
+    "num_delivered",
+    # The limit itself, and the one delivery the broker allows after it.
+    [dispatcher._MAX_DELIVERIES, dispatcher._MAX_DELIVER],
+)
+async def test_a_generation_on_its_last_delivery_is_failed_without_running(
+    monkeypatch, patched_save, patched_delete, num_delivered
+):
+    """Whatever ended the earlier deliveries (a worker killed while it loaded
+    the file, say) gets no further go: nothing is downloaded or solved, the
+    row is FAILED and the file released."""
+    save_success, save_failure = patched_save
+    _use_algorithm(monkeypatch, _QuickAlgo)
+    msg = _make_msg(generation_id=31, num_delivered=num_delivered)
+
+    # A solve would crash in this pool, and fail the row another way.
+    await dispatcher._handle_message(_make_meta(), msg, executor=_CrashingPool())
+
+    assert msg.events == ["ack"]
+    save_success.assert_not_awaited()
+    save_failure.assert_awaited_once_with(31, _delivery_limit_reason(num_delivered))
+    dispatcher.storage.download.assert_not_awaited()
+    patched_delete.assert_awaited_once_with(_STORAGE_KEY)
+
+
+async def test_the_delivery_before_the_limit_is_still_processed(
+    monkeypatch, patched_save, patched_delete, solver_thread
+):
+    save_success, save_failure = patched_save
+    _use_algorithm(monkeypatch, _QuickAlgo)
+    msg = _make_msg(num_delivered=dispatcher._MAX_DELIVERIES - 1)
+
+    await dispatcher._handle_message(_make_meta(), msg, executor=solver_thread)
+
+    assert msg.events == ["ack"]
+    save_success.assert_awaited_once()
+    save_failure.assert_not_awaited()
+
+
+async def test_a_transient_failure_before_the_limit_is_still_redelivered(
+    monkeypatch, patched_save, patched_delete
+):
+    _save_success, save_failure = patched_save
+    monkeypatch.setattr(
+        dispatcher.storage,
+        "download",
+        AsyncMock(side_effect=dispatcher.storage.TransientStorageError("storage 503")),
+    )
+    msg = _make_msg(num_delivered=dispatcher._MAX_DELIVERIES - 1)
+
+    await dispatcher._handle_message(_make_meta(), msg)
+
+    assert msg.events == ["nak"]
+    save_failure.assert_not_awaited()
+    patched_delete.assert_not_awaited()
+
+
+async def test_a_late_copy_of_a_finished_generation_is_not_failed(
+    monkeypatch, patched_save, patched_delete
+):
+    """The status check comes first: past the limit or not, a generation that
+    already has its result is acked as before and keeps it."""
+    _save_success, save_failure = patched_save
+    finished = dataclasses.replace(_make_snapshot(), status=int(GenerationStatus.SUCCESS))
+    monkeypatch.setattr(dispatcher, "_snapshot_generation", AsyncMock(return_value=finished))
+    msg = _make_msg(num_delivered=dispatcher._MAX_DELIVER)
+
+    await dispatcher._handle_message(_make_meta(), msg)
+
+    assert msg.events == ["ack"]
+    save_failure.assert_not_awaited()
+
+
+async def test_a_message_without_a_delivery_count_is_processed(
+    monkeypatch, patched_save, patched_delete, solver_thread
+):
+    """Nothing to count, so nothing to stop here; the broker's max_deliver
+    still bounds it."""
+    save_success, save_failure = patched_save
+    _use_algorithm(monkeypatch, _QuickAlgo)
+    msg = _make_msg(num_delivered=None)
+
+    await dispatcher._handle_message(_make_meta(), msg, executor=solver_thread)
+
+    assert msg.events == ["ack"]
+    save_success.assert_awaited_once()
+    save_failure.assert_not_awaited()
+
+
+def test_the_delivery_limit_leaves_room_for_the_other_retries():
+    """A solver crash is given up on first, with its own reason. The NAKs
+    before the limit ride out a few minutes of a storage or CRM outage, and
+    the broker gives the app one delivery past the limit to record it."""
+    assert dispatcher._MAX_SOLVER_CRASH_DELIVERIES < dispatcher._MAX_DELIVERIES
+    assert (dispatcher._MAX_DELIVERIES - 1) * dispatcher._NAK_RETRY_DELAY_SECONDS >= 4 * 60
+    assert dispatcher._MAX_DELIVER == dispatcher._MAX_DELIVERIES + 1

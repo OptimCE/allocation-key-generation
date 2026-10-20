@@ -231,6 +231,12 @@ piekgeheugen.
   solverproces. De compose-bestanden van de monorepo en van productie zetten
   `mem_limit: 2g` voor één. Zonder limiet wordt een solver die het geheugen van
   de host ontgroeit door OOM beëindigd, en kunnen andere containers meegaan.
+  Elk solverproces maakt zichzelf de eerste keuze van de kernel wanneer de
+  container geen geheugen meer heeft (`oom_score_adj` 1000): de oplossing
+  mislukt en wordt opnieuw geprobeerd zoals hieronder. Een gestopt hoofdproces
+  zou daarentegen de hele worker neerhalen, en zijn generaties zouden elke
+  10 minuten terugkomen, tot de afleveringslimiet hieronder. Een solverproces
+  dat zijn score niet kan verhogen, logt bij het starten een waarschuwing.
 - **Solvercrashes.** Een solverproces dat wegens geheugengebrek wordt beëindigd
   (of crasht) breekt de hele pool: elke generatie die op dat moment wordt
   opgelost, faalt mee. Elke generatie wordt opnieuw afgeleverd; een crash vanaf
@@ -249,6 +255,16 @@ piekgeheugen.
   in-progress-bevestiging. Ze wordt pas opnieuw afgeleverd als die uitblijven,
   10 minuten na de laatste: de worker is gecrasht, heeft NATS verloren of werd
   midden in de run gestopt.
+- **Afleveringslimiet.** Een generatie waarvan de afleveringen telkens zonder
+  resultaat eindigen, wordt bij haar 10e aflevering als mislukt gemarkeerd met
+  `delivery_limit_reached`, zonder opnieuw te lopen. Dat dekt tijdelijke fouten
+  (objectopslag of CRM-database onbereikbaar, elke 30 seconden opnieuw
+  geprobeerd, zodat de eerste 9 afleveringen ongeveer vierenhalve minuut storing
+  overbruggen) en een worker die midden in de run stierf of herstartte. De
+  `max_deliver` van de consumers is 11, een vangnet dat de worker bij het
+  starten op bestaande consumers toepast: JetStream stopt een bericht daar, ook
+  als de mislukking niet kon worden opgeslagen, en de generatie blijft dan in
+  afwachting.
 
 ## Tests en kwaliteit
 

@@ -20,7 +20,20 @@ Message handling follows a strict failure-class matrix:
   (``solver_crashed``) and ack. A crash breaks the whole pool, so the
   generations solving beside the one that caused it see it too and are
   retried as well. A crash that is deterministic (input too large for the
-  container) repeats on every delivery and must not loop forever.
+  container) repeats on every delivery and must not loop forever. The
+  solver processes volunteer as the kernel's first victim when the container
+  runs out of memory (``worker.main._init_solver_process``), so that the
+  shortage lands here. Without that, the kernel could kill the main process
+  instead: the message would come back after ack_wait, and only the delivery
+  limit below would stop it.
+* **Deliveries that end without a result** (a NAK above, or a worker that
+  died, lost NATS or was shut down mid-run, whose message comes back after
+  ack_wait) — JetStream counts them. From delivery ``_MAX_DELIVERIES`` on,
+  the generation is marked FAILED (``delivery_limit_reached``) and acked
+  without running anything, so that whatever ended the earlier deliveries
+  cannot repeat forever. The consumer's ``max_deliver`` (``_MAX_DELIVER``)
+  stops the broker one delivery later, in case even that could not be
+  recorded.
 
 Long runs
 ---------
@@ -106,6 +119,21 @@ _NAK_RETRY_DELAY_SECONDS = 30
 # also fails the generations solving next to the one that caused it.
 _MAX_SOLVER_CRASH_DELIVERIES = 3
 
+# The delivery on which a generation is no longer processed: it is marked
+# FAILED and acked at once. Nothing else bounds a message whose deliveries keep
+# ending without a result: a NAK for a transient failure, or a worker that died
+# (its main process killed, say), lost NATS or was shut down mid-run, so that
+# the message came back after ack_wait. _MAX_SOLVER_CRASH_DELIVERIES covers
+# solver crashes only. The 9 deliveries before it ride out about four and a
+# half minutes of a storage or CRM outage (_NAK_RETRY_DELAY_SECONDS apart).
+_MAX_DELIVERIES = 10
+
+# The consumer's max_deliver, a backstop for the check above: one delivery
+# more, in case the last one could not record the failure (the database was
+# down as well). The broker never delivers a message again once it reaches
+# this, and its generation then stays PENDING.
+_MAX_DELIVER = _MAX_DELIVERIES + 1
+
 
 @dataclasses.dataclass(frozen=True)
 class _GenerationSnapshot:
@@ -165,12 +193,16 @@ async def subscribe_algorithm(
       unacked; set to the pool size so the broker never hands us more work
       than we can actively solve.
 
-    ``subscribe_durable`` writes ``ack_wait`` and ``max_ack_pending`` onto a
-    durable an earlier build created. ``js.subscribe`` alone would not: it
-    binds with the broker's stored values and ignores the ones passed here.
+    ``max_deliver`` is always ``_MAX_DELIVER``, one more than the delivery on
+    which ``_process`` gives up (``_MAX_DELIVERIES``).
+
+    ``subscribe_durable`` writes ``ack_wait``, ``max_deliver`` and
+    ``max_ack_pending`` onto a durable an earlier build created. ``js.subscribe``
+    alone would not: it binds with the broker's stored values and ignores the
+    ones passed here.
     """
     handler = _make_handler(meta, executor=executor, semaphore=semaphore, inflight=inflight)
-    config_kwargs: dict = {"ack_wait": _ACK_WAIT_SECONDS}
+    config_kwargs: dict = {"ack_wait": _ACK_WAIT_SECONDS, "max_deliver": _MAX_DELIVER}
     if max_ack_pending is not None:
         config_kwargs["max_ack_pending"] = max_ack_pending
     sub = await subscribe_durable(
@@ -374,6 +406,25 @@ async def _process(
             "Generation %d already in status %d; acking redelivery",
             generation_id,
             snapshot.status,
+        )
+        return _Terminal(storage_key=snapshot.file_storage_key)
+
+    # ---- Step 1b: stop a message that keeps coming back ----------------
+    # Before anything is loaded: loading may be what ended the earlier
+    # deliveries (a worker killed while parsing the file). A message without a
+    # readable count is processed; the broker's max_deliver still bounds it.
+    delivered = _delivery_count(msg)
+    if delivered is not None and delivered >= _MAX_DELIVERIES:
+        logger.error(
+            "Generation %d is on delivery %d; the earlier ones ended without a result. "
+            "Not processing it again",
+            generation_id,
+            delivered,
+        )
+        await persistence.save_failure(
+            generation_id,
+            f"delivery_limit_reached: delivery {delivered}, the earlier ones ended without "
+            "a result (transient failures, or the worker stopped mid-run)",
         )
         return _Terminal(storage_key=snapshot.file_storage_key)
 
