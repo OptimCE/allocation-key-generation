@@ -24,7 +24,7 @@ Dieser Dienst ist Teil der OptimCE-Plattform. Er wird innerhalb des
 entwickelt, das den vollständigen Stack lokal ausführt; der Rest der Plattform
 ist unter der [OptimCE-Organisation](https://github.com/OptimCE) verfügbar. Um
 mehr über das Projekt zu erfahren, besuchen Sie
-[www.optimce.be](https://www.optimce.be).
+[www.optimce.be](https://www.optimce.be/de/).
 
 ## Algorithmen
 
