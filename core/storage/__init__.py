@@ -17,6 +17,7 @@ from core.storage.client import (
     TransientStorageError,
     delete,
     download,
+    size,
     upload,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "TransientStorageError",
     "delete",
     "download",
+    "size",
     "upload",
 ]

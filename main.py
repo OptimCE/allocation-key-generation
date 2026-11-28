@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -6,6 +7,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from starlette.middleware.cors import CORSMiddleware
 
 from algorithms import autodiscover
+from api.data_export import start_export_consumer, stop_export_consumer
 from api.generation.routes import generation_routes
 from api.health.routes import health_router
 from core.config import Environment, settings
@@ -33,7 +35,13 @@ async def lifespan(app: FastAPI):
     await init_nats()
     autodiscover()
     logger.info("Starting workers")
+    # The data export's allocation-key-generation part (one at a time); disabled, and logged,
+    # without its EXPORT_STORAGE_* account. The EXPORTS stream is crm-backend's: the consumer
+    # waits for it.
+    export_stop = asyncio.Event()
+    export_task = start_export_consumer(export_stop)
     yield
+    await stop_export_consumer(export_task, export_stop)
     await close_nats()
 
 

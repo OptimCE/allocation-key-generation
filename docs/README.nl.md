@@ -23,7 +23,7 @@ Deze dienst maakt deel uit van het OptimCE-platform. Hij wordt ontwikkeld binnen
 de [OptimCE-ontwikkelingsmonorepo](https://github.com/OptimCE/monorepo), die de
 volledige stack lokaal draait; de rest van het platform is beschikbaar onder de
 [OptimCE-organisatie](https://github.com/OptimCE). Ga voor meer informatie over
-het project naar [www.optimce.be](https://www.optimce.be).
+het project naar [www.optimce.be](https://www.optimce.be/nl/).
 
 ## Algoritmen
 
